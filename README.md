@@ -460,19 +460,6 @@ Users are responsible for ensuring compliance with all applicable laws and regul
 
 ## Future Enhancements
 
-### Planned Features
-
-- **Multi-threaded Scanning**: Parallel module execution for faster analysis
-- **Real-time Monitoring Mode**: Continuous background threat detection
-- **Signature Database**: Expandable threat signature repository
-- **Report Generation**: JSON/XML/HTML output formats
-- **Configuration File Support**: Customizable detection parameters
-- **Log File Persistence**: Optional threat log storage
-- **Whitelist Management**: Known-good process/file exclusions
-- **Driver-level Monitoring**: Kernel-mode detection capabilities
-- **Network Capture**: PCAP-based traffic analysis
-- **Machine Learning Integration**: AI-powered anomaly detection
-
 ### Research Areas
 
 - Advanced evasion technique detection
