@@ -1,822 +1,654 @@
-# Threat Detection Suite
+Nexus Intelligence Framework
+Overview
+Nexus Intelligence Framework is an advanced OSINT reconnaissance platform implementing automated intelligence gathering across digital footprints. The framework combines username enumeration, email analysis, domain reconnaissance, breach correlation, and social media profiling with real-time caching and risk assessment capabilities to address modern intelligence requirements including identity verification, threat assessment, corporate reconnaissance, and digital investigation.
+Technical Architecture
+Integrated Intelligence System
+The framework implements a unified OSINT architecture with modular analysis engines:
 
-## Overview
+Seven-Module Intelligence Engine: Sequential analysis across GitHub profiles, domain infrastructure, breach databases, social media platforms, DNS records, WHOIS data, and SSL certificates
+Four-Layer Caching System: Memory-based caching with TTL management, request deduplication, response validation, and automatic cache invalidation
+Real-Time Correlation: Cross-platform identity linking with confidence scoring enabling unified profile construction across 200+ platforms
+Comprehensive Risk Assessment: Weighted scoring algorithm tracking credential exposure, privilege indicators, and security posture metrics
 
-Threat Detection Suite is an advanced endpoint detection and response (EDR) framework for Windows systems implementing automated threat identification and active remediation. The suite combines behavioral analysis, API monitoring, entropy-based cryptographic detection, and real-time remediation capabilities to address sophisticated malware including rootkits, LOLBin attacks, persistence mechanisms, and command-and-control infrastructure.
+Core Intelligence Subsystems
+HTTP Engine
 
-## Technical Architecture
+Connection pooling with 30 concurrent sessions and automatic retry strategy
+User-agent rotation across 50+ browser signatures with randomization
+Rate limiting with configurable delays and exponential backoff (5 retries, 2x multiplier)
+Proxy support for HTTP/HTTPS/SOCKS with authentication
+Cache implementation with TTL-based memory storage (3600s default)
 
-### Integrated Detection and Response System
+GitHub Intelligence
 
-The framework implements a unified threat detection and automated remediation architecture:
+Full API v3 integration with pagination support processing 100 items per page
+Repository mining: Language statistics, commit history, contributor analysis
+Email extraction through commit history traversal with Git API
+Credential scanning using 7 regex patterns: AWS keys, API tokens, private keys
+Organization mapping with membership detection and role identification
+Risk indicators: Admin mentions, exposed credentials, sensitive data
 
-- **Seven-Phase Detection Engine**: Sequential threat analysis across process behavior, API hooks, memory anomalies, registry persistence, network communications, file entropy, and LOLBin abuse
-- **Four-Module Remediation System**: Automated response capabilities including process termination, registry cleanup, file quarantine, and network disruption
-- **Real-Time Correlation**: Thread-safe logging with critical section synchronization enabling concurrent threat tracking across detection phases
-- **Comprehensive Statistics**: Detailed remediation metrics tracking successful actions, failures, and per-category breakdowns
+Domain Intelligence
 
-### Core Detection Subsystems
+DNS enumeration: A, AAAA, MX, TXT, NS, SOA, CAA records with DNSSEC validation
+Email security analysis: SPF, DKIM, DMARC policy evaluation
+WHOIS parsing: Registrant extraction, historical data correlation
+SSL/TLS analysis: Certificate chain validation, expiry monitoring
+Subdomain discovery via certificate transparency logs and DNS brute-force
 
-**Process Behavior Analyzer**
-- Real-time DLL injection detection through EnumProcessModules with configurable thresholds
-- High severity trigger: >80 loaded modules, Critical escalation: >120 modules with automatic termination
-- Suspicious process name pattern matching (audio/media/svchost themes)
-- AMSI bypass detection through non-standard DLL extension identification (.dat, .enc, .tmp)
+Breach Intelligence
 
-**API Hook Detector**
-- Six-pattern multi-signature engine: Short JMP (0xEB), Long JMP (0xE9), PUSH+RET (0x68...0xC3), MOV R11 trampoline (0x49 0xBB), RIP-relative JMP (0xFF 0x25), RIP-relative CALL (0xFF 0x15)
-- Monitors five critical kernel32 APIs: CreateProcessA, CreateRemoteThread, WriteProcessMemory, LoadLibraryA, SetWindowsHookExA
-- Memory integrity verification via ReadProcessMemory on function prologues
-- Detours-compatible hook signature recognition
+HaveIBeenPwned API v3 integration with authentication
+Breach correlation: Email, domain, and paste analysis
+Temporal analysis with breach timeline construction
+Risk scoring based on severity: Passwords > Financial > PII
+Statistics tracking: Total breaches, unique passwords, data classes
 
-**Memory Anomaly Scanner**
-- VirtualQueryEx-based executable region enumeration
-- PAGE_EXECUTE_READWRITE and PAGE_EXECUTE_WRITECOPY protection flag detection
-- NOP sled identification: 10+ consecutive 0x90 bytes triggers CRITICAL severity
-- Automatic process termination on shellcode detection
-- Minimum region size filtering (>4KB) to reduce false positives
+Social Media Intelligence
 
-**Registry Persistence Monitor**
-- Six registry path scanning: HKCU/HKLM Run, RunOnce, WOW6432Node variants
-- Nine malware signature patterns: Audio, MSAudio, Media, WindowsUpdate, svchost, driver, sound, Spy, Monitor
-- Automatic registry value deletion via RegDeleteValueA on detection
-- KEY_ALL_ACCESS permission enforcement for remediation
-- Real-time statistics tracking for registry entries removed
+Platform coverage across 200+ social networks, forums, and services
+Username availability checking with real-time validation
+Profile discovery with metadata extraction when available
+Cross-correlation enabling identity linking across platforms
+Confidence scoring using response codes and content validation
 
-**Network Connection Analyzer**
-- GetTcpTable2 enumeration filtering for MIB_TCP_STATE_ESTAB connections
-- Suspicious port detection: 4444, 5555, 6666, 7777, 8888, 9999, 31337, 12345, 666, 1337
-- Process-to-connection correlation via dwOwningPid
-- Automatic process termination on C2 port detection
-- Remote IP and port logging for forensic analysis
+Risk Assessment Engine
 
-**Persistence File Detector**
-- Real Shannon entropy calculation: -Σ(p × log₂(p)) with 7.8 bits/byte threshold
-- HIDDEN+SYSTEM attribute combination detection (extremely rare in legitimate files)
-- Automatic file quarantine via MoveFileExA with .QUARANTINE extension
-- Temp directory scanning for encrypted persistence files
-- Extension-based targeting: .dat, .enc for encryption indicator correlation
+Weighted scoring algorithm (0-100 scale) with multi-factor analysis
+GitHub exposure scoring: Credentials (+15), admin roles (+10), no 2FA (+5)
+Breach severity assessment: Password breaches (+20), recent breaches (+10)
+Domain security evaluation: No DNSSEC (+10), missing SPF/DMARC (+10)
+Risk classification: CRITICAL (86-100), HIGH (71-85), MEDIUM (51-70), LOW (26-50)
 
-**LOLBin Abuse Analyzer**
-- Real PEB (Process Environment Block) parsing via NtQueryInformationProcess
-- Command-line extraction: PROCESS_BASIC_INFORMATION → PEB → RTL_USER_PROCESS_PARAMETERS → CommandLine.Buffer
-- Weighted risk scoring algorithm with 12 indicators (0-100+ scale)
-- certutil.exe patterns: -encode (+25), -encodedCommand (+30), -urlcache (+30), -download (+35), http/https (+15)
-- PowerShell patterns: -enc (+20), IEX (+35), DownloadString (+40), FromBase64String (+25), -WindowStyle Hidden (+20)
-- WMI detection: process + call pattern (+50)
-- CRITICAL threshold: 85+ points triggers automatic termination
-- HIGH threshold: 50+ points triggers logging without remediation
+Correlation Engine
 
-### Performance Characteristics
+Identity resolution matching usernames, emails, and names across platforms
+Temporal correlation aligning timelines from different sources
+Confidence scoring assigning probability to identity matches
+Graph construction building relationship networks
+Pattern recognition identifying behavioral indicators
 
-- **Sequential execution**: 7 detection phases + 4 remediation modules with optimized resource management
-- **Thread-safe logging**: Critical section synchronization via InitializeCriticalSection/EnterCriticalSection/LeaveCriticalSection
-- **Memory efficiency**: Bounded buffers (MAX_THREAT_DESC: 512 bytes, MAX_IOC_LEN: 256 bytes) with _TRUNCATE protection
-- **Error resilience**: Comprehensive handle validation, NULL pointer checks, and graceful degradation on API failures
-- **Resource cleanup**: Automatic handle closure (CloseHandle) and critical section deletion on shutdown
+Performance Characteristics
 
-## Feature Implementation
+Sequential execution: 7 intelligence modules with optimized ordering
+Response time: <2s for single module, <30s for comprehensive scan
+Memory efficiency: Bounded at 100MB with streaming parsers
+Cache hit ratio: 60% reduction in API calls via intelligent caching
+Rate compliance: Automatic throttling for API limits
+Error resilience: Graceful degradation on module failures
 
-### Automated Remediation Capabilities
+Feature Implementation
+Automated Intelligence Capabilities
+Username Enumeration Module
+pythondef enumerate_username(username: str) -> Dict:
+    """
+    Platform checking across 200+ sites
+    Response validation (200, 301, 302 = found)
+    Metadata extraction where available
+    Cross-platform correlation
+    Confidence scoring per result
+    """
+Email Intelligence Module
+pythondef analyze_email(email: str) -> Dict:
+    """
+    Format validation (RFC 5322)
+    Domain verification (MX records)
+    Breach database lookup
+    Paste correlation
+    Risk assessment scoring
+    """
+Domain Analysis Module
+pythondef analyze_domain(domain: str) -> Dict:
+    """
+    DNS record enumeration
+    WHOIS data extraction
+    SSL certificate analysis
+    Subdomain discovery
+    Technology stack identification
+    """
+Risk Scoring Algorithm
+pythondef calculate_risk_score(intel: Dict) -> RiskAssessment:
+    """
+    Score calculation (0-100 scale):
+    
+    GitHub indicators (0-30 points):
+      - Exposed credentials: +15 points
+      - Admin/root mentions: +10 points  
+      - No 2FA enabled: +5 points
+    
+    Breach indicators (0-40 points):
+      - Password breaches: +20 points
+      - Financial breaches: +15 points
+      - Recent breaches (<1 year): +5 points
+    
+    Domain indicators (0-30 points):
+      - No DNSSEC: +10 points
+      - No email security (SPF/DKIM): +10 points
+      - Expired SSL: +10 points
+    """
+Detection Integration Points
+Six automated intelligence triggers:
 
-**Process Termination Module**
-```cpp
-RemediateProcessTermination(DWORD pid, LPCSTR process_name)
-- Opens process with PROCESS_TERMINATE rights
-- Executes TerminateProcess() with exit code 127
-- Logs ACTION_KILL_PROCESS with success/failure status
-- Updates statistics: processes_killed, successful_actions, auto_remediation_count
-- Integrated with: LOLBin detection (risk ≥85), Memory shellcode detection (NOP sled), 
-  C2 detection (suspicious ports), DLL injection (>120 modules)
-```
+GitHub Profile Found
 
-**Registry Cleanup Module**
-```cpp
-RemediateRegistryCleanup(HKEY root, LPCSTR subkey, LPCSTR value_name)
-- Opens key with KEY_ALL_ACCESS permissions
-- Deletes value via RegDeleteValueA
-- Handles ERROR_ACCESS_DENIED gracefully
-- Logs ACTION_REMOVE_REGISTRY with error codes
-- Updates statistics: registry_entries_removed, auto_remediation_count
-- Integrated with: Registry persistence detection (9 malware patterns)
-```
+Calls: GitHubIntel.analyze(username)
+Collects: Profile data, repos, emails, organizations
+Risk assessment: Credential exposure, privilege indicators
 
-**File Quarantine Module**
-```cpp
-RemediateFileQuarantine(LPCSTR file_path)
-- Moves file using MoveFileExA with MOVEFILE_REPLACE_EXISTING
-- Appends .QUARANTINE extension to quarantined path
-- Preserves original file for forensic analysis
-- Logs ACTION_QUARANTINE with source and destination paths
-- Updates statistics: files_deleted, auto_remediation_count
-- Integrated with: HIDDEN+SYSTEM detection, High entropy files (>7.8 bits/byte)
-```
 
-**Risk Scoring Algorithm**
-```cpp
-CalculateLOLBinRiskScore(LPCSTR command_line)
-- Non-destructive read-only calculation
-- Accumulative scoring: 12 command-line indicators
-- Pattern matching: strstr() for case-sensitive detection
-- Returns integer score: 0-100+ scale
-- Thresholds: CRITICAL (85+), HIGH (50+), No action (<50)
-```
+Email Address Validated
 
-### Detection Integration Points
+Calls: EmailIntel.validate(email)
+Checks: Breach databases, paste sites
+Risk assessment: Data exposure severity
 
-**Six automated remediation triggers:**
 
-1. **LOLBin Critical Risk** (risk_score ≥ LOLBIN_CRITICAL_SCORE [85])
-   - Calls: RemediateProcessTermination(pid, process_name)
-   - Logged as: SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE
+Domain Discovered
 
-2. **Memory Shellcode Detection** (nop_count ≥ 10)
-   - Calls: RemediateProcessTermination(pid, process_name)
-   - Logged as: SEVERITY_CRITICAL, CAT_MEMORY_ANOMALY
+Calls: DomainIntel.analyze(domain)
+Enumerates: DNS, WHOIS, SSL
+Risk assessment: Security configuration
 
-3. **Registry Persistence Match** (9 malware patterns)
-   - Calls: RemediateRegistryCleanup(HKEY_CURRENT_USER, path, value_name)
-   - Logged as: SEVERITY_CRITICAL, CAT_REGISTRY_ANOMALY
 
-4. **HIDDEN+SYSTEM File Attributes**
-   - Calls: RemediateFileQuarantine(full_path)
-   - Logged as: SEVERITY_CRITICAL, CAT_PERSISTENCE
+Social Media Profile Found
 
-5. **High Entropy Encrypted Files** (entropy > FILE_ENTROPY_CRITICAL [7.8])
-   - Calls: RemediateFileQuarantine(full_path)
-   - Logged as: SEVERITY_CRITICAL, CAT_PERSISTENCE
-   - Additional conditions: HIDDEN attribute OR .dat/.enc extension
+Calls: SocialIntel.check_platform(username, platform)
+Validates: Profile existence, metadata
+Risk assessment: Cross-platform correlation
 
-6. **C2 Communication on Suspicious Ports**
-   - Calls: RemediateProcessTermination(owning_pid, "C2 Process")
-   - Logged as: SEVERITY_CRITICAL, CAT_C2_COMMUNICATION
 
-7. **Excessive DLL Loading** (dll_count > 120)
-   - Calls: RemediateProcessTermination(pid, process_name)
-   - Logged as: SEVERITY_CRITICAL, CAT_DLL_INJECTION
+Breach Data Correlated
 
-## Installation
+Calls: BreachIntel.correlate(identifiers)
+Aggregates: Multiple breach sources
+Risk assessment: Cumulative exposure
 
-### System Requirements
 
-- **Operating System**: Windows 10 (1809+), Windows 11, Windows Server 2016+
-- **Compiler**: Visual Studio 2019 or later, MSVC v142 toolset, Windows SDK 10.0.18362.0+
-- **Privileges**: Administrator rights required for process memory access, registry modification, process termination
-- **Hardware**: 4GB RAM minimum (8GB recommended), 100MB disk space, x64 processor
-- **Dependencies**: C++17 standard library, Windows API libraries (ws2_32, advapi32, shell32, psapi, iphlpapi, ntdll)
+Risk Threshold Exceeded
 
-### Compilation Instructions
+Calls: RiskScorer.calculate(all_intel)
+Evaluates: Combined risk factors
+Output: Risk level and recommendations
 
-**Visual Studio Developer Command Prompt (Recommended):**
-```cmd
-cl.exe /EHsc /std:c++17 /W4 /permissive- /O2 ThreatDetectionSuitex.cpp ^
-  /link ws2_32.lib advapi32.lib shell32.lib psapi.lib iphlpapi.lib ntdll.lib ^
-  /OUT:ThreatDetectionSuite.exe
-```
 
-**CMake Build (Cross-Platform):**
-```bash
-mkdir build && cd build
-cmake -G "Visual Studio 16 2019" -A x64 ..
-cmake --build . --config Release
-```
 
-**MinGW-w64 (Alternative):**
-```bash
-g++ -std=c++17 -O2 -Wall -Wextra ThreatDetectionSuitex.cpp ^
-  -lws2_32 -ladvapi32 -lshell32 -lpsapi -liphlpapi -lntdll ^
-  -o ThreatDetectionSuite.exe
-```
+Installation
+System Requirements
 
-### Library Dependencies
+Operating System: Linux, macOS, Windows 10+ (WSL)
+Python: 3.8 or higher
+Memory: 2GB RAM minimum (4GB recommended)
+Storage: 100MB free space
+Network: Stable internet connection
 
-```
-ws2_32.lib      - Winsock 2: TCP connection enumeration (GetTcpTable2)
-advapi32.lib    - Advanced API: Registry operations (RegOpenKeyExA, RegDeleteValueA)
-shell32.lib     - Shell API: Path resolution (SHGetFolderPath), file operations
-psapi.lib       - Process API: Module enumeration (EnumProcessModules, GetModuleFileNameExA)
-iphlpapi.lib    - IP Helper: Network tables (GetTcpTable2, MIB_TCPTABLE2)
-ntdll.lib       - NT Layer: PEB access (NtQueryInformationProcess, PROCESS_BASIC_INFORMATION)
-```
+Dependency Installation
+bash# Core dependencies
+pip install requests>=2.31.0        # HTTP library
+pip install dnspython>=2.3.0        # DNS resolution  
+pip install python-whois>=0.8.0     # WHOIS lookups
+pip install beautifulsoup4>=4.12.0  # HTML parsing
+pip install rich>=13.5.0            # Terminal UI
+pip install jinja2>=3.1.0           # Template engine
+pip install lxml>=4.9.0             # XML processing
+pip install aiohttp>=3.8.0          # Async HTTP
+Configuration Setup
+bash# Clone repository
+git clone https://github.com/yourusername/nexus-intelligence.git
+cd nexus-intelligence
 
-## Usage
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Linux/macOS
+venv\Scripts\activate     # Windows
 
-### Command-Line Execution
+# Install requirements
+pip install -r requirements.txt
 
-```cmd
-# Requires Administrator privileges
-ThreatDetectionSuite.exe
+# Configure API keys
+cp .env.example .env
+nano .env  # Add your API keys
+API Configuration
+ini# .env file
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+HAVEIBEENPWNED_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SHODAN_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# Expected privilege check on startup:
-# Administrator privileges verified: Proceeding with detection
+# Proxy settings
+HTTP_PROXY=http://proxy:8080
+SOCKS_PROXY=socks5://127.0.0.1:9050
+
+# Framework settings  
+RATE_LIMIT_DELAY=1.5
+REQUEST_TIMEOUT=20
+CACHE_TTL=3600
+Usage
+Command-Line Execution
+bash# Basic username search
+python src/osinth.py username
+
+# Email investigation
+python src/osinth.py --email user@example.com
+
+# Domain analysis
+python src/osinth.py --domain example.com
+
+# Batch processing
+python src/osinth.py --batch targets.txt -o results.json
+
+# With proxy
+python src/osinth.py username --proxy socks5://127.0.0.1:9050
+
+# Export formats
+python src/osinth.py username --format html --output report.html
 ```
 
 ### Detection Output Format
 
-**Real-Time Console Output:**
+#### Real-Time Console Output
 ```
-EDR SUITE: THREAT DETECTION & AUTO-REMEDIATION
-Integrated Detection + Active Response System
+[OSINT] Starting comprehensive investigation...
+================================================================================
 
-[*] Starting threat detection and auto-remediation...
+[PHASE 1] GitHub Intelligence Gathering
+[+] GitHub profile found: https://github.com/johndoe
+[+] Email discovered: john.doe@example.com
+[!] Credential pattern detected in repository descriptions
+[+] 15 repositories analyzed, 3 organizations found
 
-[PHASE 1] Process Behavior & DLL Injection Analysis
-[HIGH] [DLL_INJECTION] Excessive module count: chrome.exe (PID: 4520) - 85 modules
-[CRITICAL] [DLL_INJECTION] Excessive module count: malware.exe (PID: 8832) - 125 modules
-[+] AUTO-REMEDIATION: Terminated process malware.exe (PID: 8832)
+[PHASE 2] Breach Intelligence Correlation  
+[CRITICAL] [BREACH] 3 data breaches found for john.doe@example.com
+[+] LinkedIn breach (2021): Passwords exposed
+[+] Adobe breach (2013): Email addresses exposed
 
-[PHASE 2] API Hook Detection (6-pattern engine)
-[CRITICAL] [HOOK_DETECTION] Hook detected in CreateProcessA: Long relative JMP (Detours pattern)
+[PHASE 3] Social Media Enumeration
+[+] Checking 200 platforms...
+[+] Twitter: FOUND (high confidence)
+[+] LinkedIn: FOUND (high confidence)  
+[+] Reddit: FOUND (medium confidence)
+[+] Total profiles discovered: 23/200
 
-[PHASE 3] Memory Anomaly & Shellcode Detection
-[CRITICAL] [MEMORY_ANOMALY] Shellcode NOP sled in RWX page: exploit.exe (PID: 5644)
-[+] AUTO-REMEDIATION: Terminated process exploit.exe (PID: 5644)
+[PHASE 4] Domain Intelligence Analysis
+[+] Domain: johndoe.com
+[+] MX Records: mail.johndoe.com
+[!] No DMARC policy detected
+[!] SSL certificate expires in 30 days
 
-[PHASE 4] Registry Persistence Scanning with Auto-Cleanup
-[CRITICAL] [REGISTRY_ANOMALY] Malware persistence detected: MSAudioDriver
-[+] AUTO-REMEDIATION: Deleted registry key MSAudioDriver
+[PHASE 5] Risk Assessment Calculation
+[CRITICAL] Overall risk score: 72/100 (HIGH RISK)
+- GitHub exposure: 25/30
+- Breach severity: 35/40
+- Domain security: 12/30
 
-[PHASE 5] Network C2 Detection with Auto-Termination
-[CRITICAL] [C2_COMMUNICATION] Connection to 192.168.1.100:4444 (PID: 3340)
-[+] AUTO-REMEDIATION: Terminated process with C2 connection (PID: 3340)
+================================================================================
+INTELLIGENCE REPORT SUMMARY
+Total modules executed: 7
+Critical findings: 4
+High risk indicators: 8
+Recommendations: Enable 2FA, rotate passwords, implement DMARC
 
-[PHASE 6] Persistence File Detection with Auto-Quarantine
-[CRITICAL] [PERSISTENCE] HIDDEN+SYSTEM file (malware signature): audio.dat
-[+] AUTO-REMEDIATION: Quarantined file C:\Temp\audio.dat -> C:\Temp\audio.dat.QUARANTINE
-
-[PHASE 7] LOLBin Abuse Analysis with Risk Scoring
-[CRITICAL] [LOLBIN_ABUSE] certutil.exe with critical payload (Risk: 95/100)
-[+] AUTO-REMEDIATION: Terminated process certutil.exe (PID: 7712)
-
-THREAT ANALYSIS REPORT
-Total threats detected: 42
-
-Critical threats: 15
-
-AUTO-REMEDIATION REPORT
-Total auto-remediation actions: 12
-Successful actions: 11
-Failed actions: 1
-
-Breakdown:
-  Processes terminated: 4
-  Files quarantined: 2
-  Registry entries removed: 5
-
-Detailed Threat Log:
-[CRITICAL] Excessive module count: malware.exe (PID: 8832) - 125 modules (ID: 0, PID: 8832)
-[CRITICAL] Hook detected in CreateProcessA: Long relative JMP (Detours pattern) (ID: 1, PID: 0)
-[CRITICAL] Shellcode NOP sled in RWX page: exploit.exe (PID: 5644) (ID: 2, PID: 5644)
-...
-
-Detailed Remediation Log:
-[OK] Terminated process: malware.exe (PID: 8832)
-[OK] Deleted registry value: MSAudioDriver
-[FAIL] Failed to terminate process: system_protected.exe (Error: 5 - Access Denied)
-...
-
-EDR analysis and auto-remediation complete.
-```
-
-### Threat Severity Classification
-
-| Severity | Numeric Value | Trigger Conditions | Remediation Action |
-|----------|---------------|-------------------|-------------------|
-| **CRITICAL** | 80 | LOLBin risk ≥85, NOP sled ≥10, HIDDEN+SYSTEM files, Entropy >7.8, C2 ports, DLL count >120 | Automatic termination/quarantine |
-| **HIGH** | 50 | LOLBin risk 50-84, DLL count 80-120, Suspicious registry patterns | Logged, no auto-remediation |
-| **MEDIUM** | 25 | Moderate anomalies, potential false positives | Informational logging |
-| **INFO** | 10 | Baseline activity, low-confidence indicators | Verbose logging only |
-
-### Threat Categorization
-
-**16 distinct threat categories:**
-
-```
-CAT_PROCESS_BEHAVIOR     - Process execution anomalies, suspicious naming patterns
-CAT_DLL_INJECTION        - Excessive module loading, non-standard DLL extensions
-CAT_MEMORY_ANOMALY       - RWX pages, NOP sleds, shellcode indicators
-CAT_FILE_ANOMALY         - File system anomalies, attribute manipulation
-CAT_REGISTRY_ANOMALY     - Registry persistence, malware signature patterns
-CAT_NETWORK_ANOMALY      - Network communication anomalies
-CAT_PRIVILEGE_ESC        - Privilege escalation attempts (detection only, not remediated)
-CAT_ANTI_ANALYSIS        - Anti-debugging techniques (detection only)
-CAT_CREDENTIAL_THEFT     - Credential harvesting indicators (detection only)
-CAT_HOOK_DETECTION       - API hooks, IAT manipulation, inline patches
-CAT_LOLBIN_ABUSE         - Living-off-the-land binary misuse
-CAT_PERSISTENCE          - Persistence mechanisms, encrypted files
-CAT_C2_COMMUNICATION     - Command-and-control communications
-CAT_KERNEL_ANOMALY       - Kernel-level manipulation (detection only)
-CAT_ROOTKIT_INDICATOR    - Rootkit signatures (detection only)
-CAT_EVASION              - Evasion techniques (detection only)
-```
-
-## Detection Algorithms
-
-### Shannon Entropy Calculation
-
-Implementation of information-theoretic entropy measurement for encrypted file detection:
-
-```cpp
-float CalculateEntropy(LPCVOID data, DWORD size) {
-    // Frequency analysis
-    unsigned int freq[256] = {0};
-    for (DWORD i = 0; i < size; i++) {
-        freq[((BYTE*)data)[i]]++;
-    }
-    
-    // Shannon entropy: H(X) = -Σ p(x) × log₂(p(x))
-    float entropy = 0.0f;
-    for (int i = 0; i < 256; i++) {
-        if (freq[i] > 0) {
-            float p = (float)freq[i] / size;
-            entropy -= p * log2f(p);
+Investigation complete. Results exported to report.json
+JSON Output Structure
+json{
+    "timestamp": "2024-11-25T10:45:23.456Z",
+    "framework_version": "4.0.0",
+    "target": "johndoe",
+    "github": {
+        "found": true,
+        "profile": {
+            "login": "johndoe",
+            "email": "john.doe@example.com",
+            "repos": 42,
+            "followers": 523
+        },
+        "risk_indicators": [
+            "Exposed credentials",
+            "Admin role mentioned"
+        ]
+    },
+    "breaches": {
+        "total": 3,
+        "critical": 1,
+        "breaches": [
+            {
+                "name": "LinkedIn",
+                "date": "2021-06-01",
+                "data_classes": ["Passwords", "Emails"]
+            }
+        ]
+    },
+    "social_media": {
+        "platforms_found": 23,
+        "profiles": {
+            "twitter": {"found": true, "confidence": "high"},
+            "linkedin": {"found": true, "confidence": "high"}
         }
+    },
+    "risk_assessment": {
+        "score": 72,
+        "level": "HIGH",
+        "factors": [
+            "Password breaches",
+            "Credential exposure",
+            "No 2FA enabled"
+        ]
     }
-    return entropy;  // Range: 0.0 (all zeros) to 8.0 (perfect randomness)
 }
-
-Interpretation:
-  0.0 - 4.0: Plaintext or highly structured data
-  4.0 - 6.0: Compressed or partially encrypted data
-  6.0 - 7.8: Compressed with encryption, still structured
-  >7.8:      Encrypted or cryptographically random (CRITICAL threshold)
+Intelligence Algorithms
+Credential Pattern Detection
+Advanced regex patterns for sensitive data discovery:
+pythonCREDENTIAL_PATTERNS = {
+    # AWS Credentials
+    'AWS_ACCESS_KEY': r'AKIA[0-9A-Z]{16}',
+    'AWS_SECRET_KEY': r'[0-9a-zA-Z/+=]{40}',
+    
+    # API Keys  
+    'GOOGLE_API': r'AIzaSy[0-9a-zA-Z_-]{33}',
+    'GITHUB_TOKEN': r'ghp_[0-9a-zA-Z]{36}',
+    'STRIPE_KEY': r'sk_live_[0-9a-zA-Z]{24}',
+    
+    # Private Keys
+    'RSA_PRIVATE': r'-----BEGIN RSA PRIVATE KEY-----',
+    'SSH_PRIVATE': r'-----BEGIN OPENSSH PRIVATE KEY-----',
+    
+    # Database URLs
+    'POSTGRES': r'postgres://[^:]+:[^@]+@[^/]+/\w+',
+    'MONGODB': r'mongodb(\+srv)?://[^:]+:[^@]+@[^/]+',
+}
+Platform Detection Configuration
+pythonPLATFORM_CONFIG = {
+    'twitter': {
+        'url': 'https://twitter.com/{}',
+        'valid_codes': [200],
+        'headers': {'User-Agent': 'Mozilla/5.0...'},
+        'category': 'social'
+    },
+    'linkedin': {
+        'url': 'https://linkedin.com/in/{}',
+        'valid_codes': [200, 999],
+        'headers': {'User-Agent': 'Mozilla/5.0...'},
+        'category': 'professional'
+    }
+    # ... 198 more platforms
+}
 ```
 
-### LOLBin Risk Scoring Matrix
+### Risk Scoring Matrix
 
-Weighted threat indicator accumulation with command-line pattern matching:
-
+Weighted threat indicator accumulation:
 ```
 Risk Score Calculation (0-100+ scale):
 
-certutil.exe indicators:
-  -encode                 : +25 points  (Base64 encoding operation)
-  -encodedCommand         : +30 points  (Obfuscated command execution)
-  -enc                    : +20 points  (Short-form encoding)
-  IEX                     : +35 points  (Invoke-Expression, code execution)
-  DownloadString          : +40 points  (Remote code download)
-  -urlcache               : +30 points  (URL cache manipulation)
-  -download               : +35 points  (File download operation)
-  http://                 : +15 points  (HTTP protocol indicator)
-  FromBase64String        : +25 points  (Base64 decoding)
-  Invoke-Expression       : +40 points  (Direct code execution)
-  -NoProfile              : +10 points  (PowerShell profile bypass)
-  -WindowStyle Hidden     : +20 points  (Hidden window execution)
-
-WMI indicators:
-  process + call          : +50 points  (WMI process execution)
+GitHub indicators:
+  Exposed email         : +10 points
+  Credential patterns   : +15 points
+  Admin/root mentions   : +5 points
+  
+Breach indicators:
+  Password breaches     : +20 points
+  Financial breaches    : +15 points
+  Recent (<1 year)      : +10 points
+  
+Domain indicators:
+  No DNSSEC            : +10 points
+  Missing SPF/DMARC    : +10 points
+  Expired SSL          : +10 points
 
 Classification Thresholds:
-  0-49:   No action (legitimate usage patterns)
-  50-84:  HIGH severity - Logged, manual review required
-  85-100: CRITICAL severity - Automatic process termination
-  100+:   Multiple indicators, definitive malicious intent
-```
+  0-25:   MINIMAL - Standard posture
+  26-50:  LOW - Minor exposures
+  51-70:  MEDIUM - Significant findings
+  71-85:  HIGH - Critical exposures
+  86-100: CRITICAL - Severe indicators
+Performance Benchmarks
+Execution Time Analysis
+Measured on Ubuntu 22.04, Intel i7-10700K, 16GB RAM, 1Gbps connection:
+ModuleAverage TimeAPI CallsMemory UsageCache HitGitHub Analysis3.2s1525MB20%Domain Intelligence2.1s1015MB15%Breach Lookup1.5s310MB40%Social Media (200)45s20085MB5%Risk Assessment0.8s05MB100%Total Investigation52s228100MB25%
+Resource Impact
 
-### API Hook Signature Detection
+CPU Usage: 15-20% during scan (single-threaded)
+Memory Footprint: 50-100MB resident set size
+Network Bandwidth: <1 MB/s average
+Disk I/O: Minimal, cache only
+API Efficiency: 60% reduction via caching
 
-Six-pattern recognition engine for inline API hooks and trampolines:
-
-```
-Pattern 1: Short JMP (2 bytes)
-  Signature: 0xEB xx
-  Description: Relative jump ±127 bytes
-  Use case: Short-range hooks, inline patches
-
-Pattern 2: Long JMP (5 bytes) - Detours
-  Signature: 0xE9 xx xx xx xx
-  Description: Relative jump ±2GB
-  Use case: Microsoft Detours, function hooking frameworks
-
-Pattern 3: PUSH+RET Trampoline (6 bytes)
-  Signature: 0x68 xx xx xx xx 0xC3
-  Description: Push address, return to it
-  Use case: Obfuscated hooks, anti-debugging
-
-Pattern 4: MOV R11 + JMP R11 (12 bytes, x64)
-  Signature: 0x49 0xBB ... 0x41 0xFF 0xE3
-  Description: Load 64-bit address into R11, jump to R11
-  Use case: 64-bit trampolines, position-independent hooks
-
-Pattern 5: RIP-Relative JMP (6 bytes, x64)
-  Signature: 0xFF 0x25 xx xx xx xx
-  Description: Jump to address at [RIP + offset]
-  Use case: Position-independent code, modern x64 hooks
-
-Pattern 6: RIP-Relative CALL (6 bytes, x64)
-  Signature: 0xFF 0x15 xx xx xx xx
-  Description: Call address at [RIP + offset]
-  Use case: Hook proxies, call forwarding
-
-Detection methodology:
-  1. GetProcAddress() retrieves API function pointer
-  2. ReadProcessMemory() reads first 16 bytes of function prologue
-  3. Pattern matching against 6 known hook signatures
-  4. Log SEVERITY_CRITICAL if any pattern matches
-```
-
-## Performance Benchmarks
-
-### Execution Time Analysis
-
-Measured on Windows 11 Pro, Intel Core i7-11700K, 32GB RAM, NVMe SSD:
-
-| Detection Phase | Average Time | Objects Analyzed | Memory Usage |
-|----------------|--------------|------------------|--------------|
-| Process Behavior | 2.1 seconds | 120 processes | 15 MB |
-| API Hook Detection | 1.3 seconds | 5 critical APIs | 8 MB |
-| Memory Anomaly | 4.2 seconds | 3,500 memory regions | 25 MB |
-| Registry Persistence | 1.7 seconds | 6 registry paths, ~200 values | 5 MB |
-| Network C2 Detection | 0.8 seconds | 45 active TCP connections | 3 MB |
-| Persistence Files | 3.5 seconds | 1,200 files in %TEMP% | 12 MB |
-| LOLBin Analysis | 2.4 seconds | 15 certutil/powershell/wmic processes | 10 MB |
-| **Total Scan** | **16.0 seconds** | **Full system analysis** | **78 MB peak** |
-
-### Resource Impact
-
-- **CPU Usage**: 18-25% during scan (single-threaded, sequential phases)
-- **Memory Footprint**: 50-80MB resident set size (RSS)
-- **Disk I/O**: Minimal (<5 MB/s read), no persistent logging by default
-- **Network Impact**: Zero (only reads existing TCP tables, no packets sent)
-
-## Technical Implementation
-
-### Thread-Safe Logging Architecture
-
-```cpp
-// Global resources initialization
-InitializeCriticalSection(&global_threat_lock);
-
-// Thread-safe threat logging
-void LogThreat(ThreatSeverity severity, ThreatCategory category,
-               LPCSTR description, LPCSTR ioc, DWORD pid) {
-    EnterCriticalSection(&global_threat_lock);
-    
-    ThreatLog threat;
-    threat.threat_id = global_threat_counter++;
-    threat.severity = severity;
-    threat.category = category;
-    threat.timestamp = time(NULL);
-    threat.associated_pid = pid;
-    
-    strncpy_s(threat.description, sizeof(threat.description), description, _TRUNCATE);
-    strncpy_s(threat.ioc, sizeof(threat.ioc), ioc, _TRUNCATE);
-    
-    global_threat_log.push_back(threat);
-    
-    LeaveCriticalSection(&global_threat_lock);
-}
-
-// Cleanup on shutdown
-DeleteCriticalSection(&global_threat_lock);
-```
-
-### PEB-Based Command-Line Extraction
-
-```cpp
-BOOL GetProcessCommandLine(DWORD pid, LPSTR buffer, DWORD buffer_size) {
-    // Open process with minimal rights
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-    if (!hProcess) return FALSE;
-    
-    // Query basic process information
-    PROCESS_BASIC_INFORMATION pbi;
-    NTSTATUS status = NtQueryInformationProcess(hProcess, ProcessBasicInformation, 
-                                                 &pbi, sizeof(pbi), NULL);
-    if (!NT_SUCCESS(status)) {
-        CloseHandle(hProcess);
-        return FALSE;
-    }
-    
-    // Read PEB from process memory
-    PEB peb;
-    if (!ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(PEB), NULL)) {
-        CloseHandle(hProcess);
-        return FALSE;
-    }
-    
-    // Read RTL_USER_PROCESS_PARAMETERS
-    RTL_USER_PROCESS_PARAMETERS params;
-    if (!ReadProcessMemory(hProcess, peb.ProcessParameters, &params, 
-                          sizeof(RTL_USER_PROCESS_PARAMETERS), NULL)) {
-        CloseHandle(hProcess);
-        return FALSE;
-    }
-    
-    // Read Unicode command line buffer
-    WCHAR cmd_line[2048];
-    if (!ReadProcessMemory(hProcess, params.CommandLine.Buffer, cmd_line, 
-                          params.CommandLine.Length, NULL)) {
-        CloseHandle(hProcess);
-        return FALSE;
-    }
-    
-    // Convert Unicode to ANSI
-    WideCharToMultiByte(CP_ACP, 0, cmd_line, -1, buffer, buffer_size, NULL, NULL);
-    CloseHandle(hProcess);
-    return TRUE;
-}
-```
-
-### Network Connection Correlation
-
-```cpp
-void AnalyzeNetwork() {
-    PMIB_TCPTABLE2 tcp_table = NULL;
-    DWORD table_size = 0;
-    
-    // Get required buffer size
-    if (GetTcpTable2(NULL, &table_size, TRUE) != ERROR_INSUFFICIENT_BUFFER) return;
-    
-    // Allocate TCP table
-    tcp_table = (PMIB_TCPTABLE2)malloc(table_size);
-    if (!tcp_table) return;
-    
-    // Retrieve TCP connections
-    if (GetTcpTable2(tcp_table, &table_size, TRUE) == NO_ERROR) {
-        const USHORT suspicious_ports[] = {
-            4444, 5555, 6666, 7777, 8888, 9999, 31337, 12345, 666, 1337, 0
-        };
+Technical Implementation
+HTTP Engine Architecture
+pythonclass HTTPEngine:
+    def __init__(self, cache_enabled=True, timeout=20):
+        self.session = requests.Session()
         
-        for (DWORD i = 0; i < tcp_table->dwNumEntries; i++) {
-            PMIB_TCPROW2 row = &tcp_table->table[i];
-            
-            // Filter for established connections only
-            if (row->dwState == MIB_TCP_STATE_ESTAB) {
-                IN_ADDR addr;
-                addr.S_un.S_addr = row->dwRemoteAddr;
-                USHORT remote_port = ntohs((USHORT)row->dwRemotePort);
-                
-                // Check against suspicious ports
-                for (int j = 0; suspicious_ports[j]; j++) {
-                    if (remote_port == suspicious_ports[j]) {
-                        LogThreat(SEVERITY_CRITICAL, CAT_C2_COMMUNICATION,
-                                 "C2 connection detected", inet_ntoa(addr), row->dwOwningPid);
-                        
-                        // Automatic process termination
-                        RemediateProcessTermination(row->dwOwningPid, "C2 Process");
-                        break;
-                    }
-                }
-            }
-        }
+        # Configure retry strategy
+        retry = Retry(
+            total=5,
+            backoff_factor=2,
+            status_forcelist=[429, 500, 502, 503, 504]
+        )
+        
+        # Setup connection pooling
+        adapter = HTTPAdapter(
+            max_retries=retry,
+            pool_connections=30,
+            pool_maxsize=30
+        )
+        
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # User agent rotation
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+            # ... 48 more user agents
+        ]
+Cache Manager Implementation
+pythonclass CacheManager:
+    def __init__(self, ttl: int = 3600):
+        self.cache = {}
+        self.ttl = ttl
+        self.hits = 0
+        self.misses = 0
+        
+    def get(self, key: str) -> Optional[str]:
+        if key in self.cache:
+            data, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                self.hits += 1
+                return data
+            del self.cache[key]
+        self.misses += 1
+        return None
+        
+    def set(self, key: str, value: str):
+        self.cache[key] = (value, time.time())
+        self._cleanup()
+        
+    def _cleanup(self):
+        if len(self.cache) > 1000:
+            # Remove oldest entries
+            sorted_items = sorted(
+                self.cache.items(),
+                key=lambda x: x[1][1]
+            )
+            self.cache = dict(sorted_items[-500:])
+GitHub Intelligence Extraction
+pythondef analyze_github(self, username: str) -> Dict:
+    intel = {
+        'found': False,
+        'profile': {},
+        'repositories': [],
+        'discovered_emails': set(),
+        'risk_indicators': []
     }
     
-    free(tcp_table);
-}
+    # Get user profile
+    response = self.http.get(f'{API_BASE}/users/{username}')
+    if response.status_code == 200:
+        intel['found'] = True
+        intel['profile'] = response.json()
+        
+        # Extract emails from commits
+        repos = self._paginate_api(f'{API_BASE}/users/{username}/repos')
+        for repo in repos[:10]:  # Limit to 10 repos
+            commits = self.http.get(
+                f"{API_BASE}/repos/{username}/{repo['name']}/commits"
+            )
+            for commit in commits.json()[:20]:  # Recent 20 commits
+                if commit.get('commit', {}).get('author', {}).get('email'):
+                    intel['discovered_emails'].add(
+                        commit['commit']['author']['email']
+                    )
+        
+        # Scan for credentials
+        for repo in repos:
+            if self._scan_credentials(repo.get('description', '')):
+                intel['risk_indicators'].append('Credential exposure')
+                
+    return intel
 ```
 
 ## Troubleshooting
 
 ### Common Deployment Issues
 
-**Privilege Escalation Failure**
+#### Rate Limiting Errors
 ```
-Error: OpenProcessToken failed (Error: 5 - Access Denied)
-Cause: Insufficient privileges to query token elevation
-Solution: Right-click executable → Run as Administrator, or use runas /user:Administrator
-```
-
-**Process Termination Blocked**
-```
-Error: TerminateProcess failed (Error: 5 - Access Denied)
-Cause: Attempting to terminate protected process (PPL, SYSTEM)
-Solution: Known limitation - Cannot terminate SYSTEM processes or PPL-protected processes
+Error: HTTP 429 Too Many Requests
+Cause: API rate limit exceeded
+Solution: 
+  - Increase RATE_LIMIT_DELAY in .env
+  - Use authenticated requests (API tokens)
+  - Enable caching to reduce API calls
 ```
 
-**Registry Key Deletion Failed**
+#### SSL Certificate Verification
 ```
-Error: RegDeleteValueA failed (Error: 5 - Access Denied)
-Cause: Registry key protected by permissions or in use
-Solution: Boot into Safe Mode, or use registry permissions editor (regedit → Permissions)
-```
-
-**File Quarantine Failed**
-```
-Error: MoveFileExA failed (Error: 32 - File in use)
-Cause: File locked by another process
-Solution: Reboot system, quarantine will succeed on next execution
+Error: SSL certificate verification failed
+Cause: Outdated certificates or proxy interference
+Solution:
+  - Update certificates: pip install --upgrade certifi
+  - For proxies: export REQUESTS_CA_BUNDLE=/path/to/cert.pem
 ```
 
-### False Positive Management
-
-**Legitimate PowerShell Usage:**
+#### Memory Exhaustion
 ```
-Detection: [HIGH] [LOLBIN_ABUSE] powershell.exe with suspicious payload (Risk: 65/100)
-Cause: Administrative script using -EncodedCommand for legitimate automation
-Mitigation: Whitelist known-good scripts by hash, or exclude specific command patterns
-```
-
-**Development Tools:**
-```
-Detection: [CRITICAL] [HOOK_DETECTION] Hook detected in CreateProcessA
-Cause: Visual Studio debugger, OllyDbg, x64dbg using API hooks for breakpoints
-Mitigation: Disable suite during development sessions, or whitelist debugger processes
+Error: MemoryError during large batch processing
+Cause: Too many concurrent operations
+Solution:
+  - Process in smaller batches (--batch-size 10)
+  - Disable caching (--no-cache)
+  - Increase system swap space
 ```
 
-**Encrypted Backups:**
+#### DNS Resolution Failures
 ```
-Detection: [CRITICAL] [PERSISTENCE] Encrypted persistence file (entropy: 7.92)
-Cause: Legitimate encrypted backup file in %TEMP% directory
-Mitigation: Exclude backup directories, or adjust FILE_ENTROPY_CRITICAL threshold to 7.95
-```
+Error: DNS resolution failed for domain
+Cause: DNS server issues or invalid domain
+Solution:
+  - Verify domain format
+  - Use alternative DNS (8.8.8.8)
+  - Check network connectivity
+Debug Configuration
+Enable verbose debugging:
+python# Set environment variables
+export OSINT_DEBUG=1
+export OSINT_LOG_LEVEL=DEBUG
 
-### Debug Configuration
+# Run with debug flags
+python src/osinth.py target -vvv --debug
 
-Enable verbose logging by adding debug output:
+# Debug specific modules
+python src/osinth.py target --debug-module github
 
-```cpp
-// In AnalyzeLOLBins() function:
-printf("[DEBUG] Process: %s, PID: %lu\n", entry.szExeFile, entry.th32ProcessID);
-printf("[DEBUG] Command line: %s\n", command_line);
-printf("[DEBUG] Risk score: %d/100\n", risk_score);
+# Save debug output
+python src/osinth.py target --debug 2>&1 | tee debug.log
+Security Considerations
+Operational Security
+Traffic Analysis Prevention:
 
-// In AnalyzeMemory() function:
-printf("[DEBUG] Memory region: 0x%p, Size: %lu bytes, Protection: 0x%lx\n",
-       mbi.BaseAddress, mbi.RegionSize, mbi.Protect);
+User agent rotation across 50+ signatures
+Random delays between requests (1-5 seconds)
+Connection pooling to reduce DNS lookups
+Header randomization (Accept-Language, Accept-Encoding)
 
-// Compile with debug symbols:
-cl.exe /Zi /EHsc /std:c++17 ThreatDetectionSuitex.cpp /link /DEBUG ws2_32.lib ...
-```
+Detection Evasion:
 
-## Security Considerations
+Proxy rotation support
+Tor integration capability
+VPN compatibility
+Distributed scanning option
+Session fingerprint randomization
 
-### Operational Requirements
+Data Security:
 
-**Pre-Deployment Checklist:**
-1. Obtain written authorization from system owner
-2. Create system restore point or VM snapshot
-3. Back up critical registry keys: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-4. Document baseline system state for comparison
-5. Review detection thresholds (LOLBIN_CRITICAL_SCORE, FILE_ENTROPY_CRITICAL)
-6. Configure whitelist for known-good processes if needed
+No persistent storage of credentials
+Memory-only caching by default
+Encrypted export option
+Secure deletion of temporary files
+API key masking in logs
 
-**Safe Deployment Practices:**
-- Deploy on isolated test system first
-- Monitor resource consumption (CPU, memory, disk I/O)
-- Review threat logs before executing remediation
-- Keep system administrators on standby for immediate response
-- Have rollback procedures documented and tested
+Legal and Ethical Compliance
+Authorization Requirements:
 
-### System Impact Awareness
+Obtain written permission for corporate targets
+Verify ownership of accounts being investigated
+Comply with platform terms of service
+Respect robots.txt directives
+Follow responsible disclosure practices
 
-**Automated remediation will:**
-- Terminate processes matching threat signatures (exit code 127)
-- Delete registry values in AutoRun locations
-- Move files to quarantine with .QUARANTINE extension
-- Disrupt network connections for processes on suspicious ports
+Privacy Regulations:
 
-**Potential side effects:**
-- Service interruption if legitimate process terminated
-- Startup failure if legitimate AutoRun entry deleted
-- Application errors if quarantined file required for operation
-- Data loss risk if false positive on critical file
+GDPR (European Union) - Data protection and privacy
+CCPA (California) - Consumer privacy rights
+PIPEDA (Canada) - Personal information protection
+Local privacy laws in jurisdiction of operation
 
-### Legal and Ethical Compliance
+Known Limitations
+Technical Constraints
 
-**Authorization Requirements:**
-- Explicit written permission from system owner
-- Scope documentation specifying authorized actions
-- Duration limits for testing window
-- Incident reporting contact information
+API Dependencies: Reliance on third-party API availability
+Rate Limits: Platform-specific request restrictions
+Detection: Anti-bot mechanisms may block requests
+Data Freshness: Cache may serve outdated information
+Coverage: Not all platforms provide API access
 
-**Regulatory Compliance:**
-- CFAA (Computer Fraud and Abuse Act) - United States
-- GDPR (General Data Protection Regulation) - European Union
-- Local cybersecurity laws in jurisdiction of deployment
-- Industry-specific regulations (PCI-DSS, HIPAA, SOX)
+Architectural Limitations
 
-## Reporting and Forensics
+Sequential Processing: No true parallel execution
+Memory Bound: Large investigations may exhaust RAM
+Network Dependent: Requires stable internet connection
+No Real-time Monitoring: Snapshot analysis only
+Limited Depth: Surface-level reconnaissance
 
-### Threat Log Structure
+Support and Contact
+Issue Reporting
+For bugs and features:
 
-```cpp
-typedef struct {
-    DWORD threat_id;                    // Unique sequential identifier
-    ThreatSeverity severity;            // CRITICAL, HIGH, MEDIUM, INFO
-    ThreatCategory category;            // 16 distinct categories
-    CHAR description[MAX_THREAT_DESC];  // Human-readable description (512 bytes)
-    CHAR ioc[MAX_IOC_LEN];             // Indicator of Compromise (256 bytes)
-    time_t timestamp;                   // Unix epoch timestamp
-    DWORD associated_pid;               // Process ID (0 if not process-related)
-} ThreatLog;
-```
-
-### Remediation Result Structure
-
-```cpp
-typedef struct {
-    RemediationActionType action_type;  // KILL_PROCESS, DELETE_FILE, REMOVE_REGISTRY, etc.
-    CHAR target[MAX_PATH];              // Target of remediation action
-    BOOL success;                       // TRUE if action succeeded
-    DWORD error_code;                   // Win32 error code on failure
-    CHAR status_message[256];           // Human-readable status
-} RemediationResult;
-```
-
-### Statistics Tracking
-
-```cpp
-typedef struct {
-    int total_actions;              // Total remediation attempts
-    int successful_actions;         // Successfully completed actions
-    int failed_actions;             // Failed actions (permissions, locked files, etc.)
-    int files_deleted;              // Files quarantined
-    int processes_killed;           // Processes terminated
-    int registry_entries_removed;   // Registry values deleted
-    int tasks_removed;              // Scheduled tasks removed (not implemented)
-    int blocked_connections;        // Network connections disrupted
-    int auto_remediation_count;     // Total auto-remediation events
-} RemediationStatistics;
-```
-
-## Known Limitations
-
-### Technical Constraints
-
-1. **Protected Processes**: Cannot terminate SYSTEM processes, PPL-protected processes, or critical system services (csrss.exe, smss.exe, etc.)
-2. **Kernel-Level Evasion**: Rootkits operating in kernel mode bypass user-mode detection entirely
-3. **DKOM Techniques**: Direct Kernel Object Manipulation (DKOM) can hide processes from CreateToolhelp32Snapshot
-4. **PatchGuard**: Kernel Patch Protection prevents certain kernel-level detection techniques on x64 Windows
-5. **VM Detection**: Sophisticated malware can detect sandbox environments and alter behavior
-
-### Architectural Limitations
-
-- **Single-threaded execution**: Sequential phase execution (no parallel scanning)
-- **No kernel driver**: Relies entirely on user-mode APIs, cannot detect kernel-level threats comprehensively
-- **No persistent storage**: Logs stored in memory only, lost on process termination
-- **No network interception**: Cannot analyze encrypted network traffic (TLS/SSL)
-- **No signature database**: Heuristic-only detection, no malware signature matching
-
-## Legal Disclaimer
-
-THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-### Critical Legal Notices
-
-1. **No Warranty**: The developer provides NO WARRANTY regarding detection accuracy, reliability, or completeness. False positives and false negatives are possible.
-
-2. **User Responsibility**: Users bear FULL RESPONSIBILITY for:
-   - Obtaining proper authorization before deployment
-   - Verifying detection accuracy before remediation
-   - Data loss from automated remediation
-   - System downtime or service interruption
-   - Compliance with applicable laws and regulations
-
-3. **Limitation of Liability**: The developer SHALL NOT BE LIABLE for any special, direct, indirect, consequential, incidental, or punitive damages arising from use of this software, including but not limited to:
-   - Data loss or corruption
-   - System unavailability
-   - False positives causing operational impact
-   - Missed detections or undetected threats
-   - Legal consequences of unauthorized use
-
-4. **Authorization Requirement**: Unauthorized deployment on systems you do not own or control is ILLEGAL under:
-   - Computer Fraud and Abuse Act (CFAA) - 18 U.S.C. § 1030
-   - Computer Misuse Act (UK)
-   - Budapest Convention on Cybercrime
-   - Local criminal statutes in your jurisdiction
-
-## Support and Contact
-
-### Issue Reporting
-
-For non-sensitive issues:
-- **GitHub Issues**: https://github.com/genesisgzdev/threat-detection-suite/issues
-- **Documentation**: README.md, BUILDING.md, SECURITY.md
+GitHub Issues: https://github.com/yourusername/nexus-intelligence/issues
+Documentation: README.md, CONTRIBUTING.md, SECURITY.md
 
 For security vulnerabilities:
-- **Email**: genzt.dev@pm.me (use PGP encryption for sensitive disclosures)
-- **Responsible Disclosure**: 90-day disclosure timeline from initial report
 
-### Contributing
+Email: genzt.dev@pm.me
+PGP Key: [Public key fingerprint]
+Responsible Disclosure: 90-day timeline
 
+Contributing
 Contributions welcome in areas of:
-- New detection algorithms for emerging threats
-- Performance optimizations for faster scanning
-- False positive reduction through improved heuristics
-- Documentation improvements and usage examples
-- Test case development for validation
 
-See CONTRIBUTING.md for code quality standards and submission guidelines.
+New intelligence modules for emerging platforms
+Performance optimizations for faster scanning
+False positive reduction in detection algorithms
+Documentation improvements and examples
+Test case development for validation
 
-## Author
-
-**Genesis**  
-Security Researcher & Software Developer  
-
-**Contact**: genzt.dev@pm.me   
-
-## License
-
+Author
+Security Researcher & Developer
+Contact: genzt.dev@pm.me
+License
 MIT License - See LICENSE file for complete terms.
-
-Copyright (c) 2025 Genesis
-
+Copyright (c) 2025
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
----
-
-**Threat Detection Suite** - Advanced Endpoint Detection and Response for Windows Systems  
-*Automated threat identification with integrated remediation capabilities*
+Nexus Intelligence Framework - Advanced OSINT reconnaissance for digital investigation
+Automated intelligence gathering with integrated risk assessment
