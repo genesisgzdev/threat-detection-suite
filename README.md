@@ -785,10 +785,8 @@ For non-sensitive issues:
 - **Documentation**: README.md, BUILDING.md, SECURITY.md
 
 For security vulnerabilities:
-- **Email**: genzt.dev@pm.me (use PGP encryption for sensitive disclosures)
+- **Security Issues**: genesis.Issues@pm.me (PGP required)
 - **Responsible Disclosure**: 90-day disclosure timeline from initial report
-
-### Contributing
 
 Contributions welcome in areas of:
 - New detection algorithms for emerging threats
