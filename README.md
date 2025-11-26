@@ -800,15 +800,14 @@ See CONTRIBUTING.md for code quality standards and submission guidelines.
 ## Author
 
 **Genesis**  
-Security Researcher & Software Developer  
-
-**Contact**: genzt.dev@pm.me   
+**Security Researcher & Developer**  
+Contact & Support: genzt.dev@pm.me   
 
 ## License
 
 MIT License - See LICENSE file for complete terms.
 
-Copyright (c) 2025 Genesis
+Copyright (c) 2025 
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
