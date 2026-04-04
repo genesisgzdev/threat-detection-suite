@@ -49,7 +49,7 @@ PVOID GetProcessPeb(PEPROCESS Process) {
 
 BOOLEAN IsLsass(PEPROCESS Process) {
     UNICODE_STRING lsassName;
-    RtlInitUnicodeString(&lsassName, L"lsass.exe");
+    RtlInitUnicodeString(&lsassName, L"\\Windows\\System32\\lsass.exe");
     PUNICODE_STRING procName = NULL;
     SeLocateProcessImageName(Process, &procName);
     if (procName) {
