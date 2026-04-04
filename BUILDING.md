@@ -1,6 +1,6 @@
-# BUILDING: Nexus Intelligence EDR v4.0
+# BUILDING: Threat Detection Suite v4.0
 
-This guide provides instructions for building the Nexus Intelligence EDR suite from source. The project uses a modular build process involving CMake for user-mode components and the Windows Driver Kit (WDK) for the kernel-mode driver.
+This guide provides instructions for building the Threat Detection Suite suite from source. The project uses a modular build process involving CMake for user-mode components and the Windows Driver Kit (WDK) for the kernel-mode driver.
 
 ## Prerequisites
 
@@ -28,17 +28,17 @@ cmake .. -G "Visual Studio 17 2022" -A x64
 cmake --build . --config Release
 ```
 
-The resulting binaries (e.g., `NexusService.exe`) will be located in the `bin/Release` directory.
+The resulting binaries (e.g., `ThreatDetectionService.exe`) will be located in the `bin/Release` directory.
 
-### 3. Build Kernel-Mode Driver (NexusKernel)
+### 3. Build Kernel-Mode Driver (ThreatDetectionKernel)
 The driver must be built using the MSBuild system provided by the WDK.
 
 ```powershell
-cd NexusEDR/driver
-msbuild NexusKernel.vcxproj /p:Configuration=Release /p:Platform=x64
+cd ThreatDetectionSuite/TDSDriver
+msbuild ThreatDetectionKernel.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
-The resulting driver file (`NexusKernel.sys`) will be in the `x64/Release` directory.
+The resulting driver file (`ThreatDetectionKernel.sys`) will be in the `x64/Release` directory.
 
 ### 4. Code Signing
 Kernel-mode drivers must be signed to be loaded on 64-bit Windows systems. For development, you can use a self-signed certificate and enable Test Signing mode.
@@ -48,7 +48,7 @@ Kernel-mode drivers must be signed to be loaded on 64-bit Windows systems. For d
 bcdedit /set testsigning on
 
 # Sign the driver with a test certificate (Placeholder)
-signtool sign /v /s PrivateCertStore /n "NexusTestCert" /t http://timestamp.digicert.com x64/Release/NexusKernel.sys
+signtool sign /v /s PrivateCertStore /n "TDSestCert" /t http://timestamp.digicert.com x64/Release/ThreatDetectionKernel.sys
 ```
 
 ## Modular Build Scripts

@@ -23,7 +23,7 @@ public:
     }
 
     bool Start() {
-        ULONG bufferSize = sizeof(EVENT_TRACE_LOG_PROPERTIES) + sizeof(L"NexusTrace") + 2;
+        ULONG bufferSize = sizeof(EVENT_TRACE_LOG_PROPERTIES) + sizeof(L"TDSTrace") + 2;
         pProperties = (EVENT_TRACE_LOG_PROPERTIES*)malloc(bufferSize);
         memset(pProperties, 0, bufferSize);
         pProperties->Wnode.BufferSize = bufferSize;
@@ -32,8 +32,8 @@ public:
         pProperties->LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
         pProperties->LoggerNameOffset = sizeof(EVENT_TRACE_LOG_PROPERTIES);
 
-        ControlTraceW(NULL, L"NexusTrace", pProperties, EVENT_TRACE_CONTROL_STOP); // Stop previous if any
-        ULONG status = StartTraceW(&hTrace, L"NexusTrace", pProperties);
+        ControlTraceW(NULL, L"TDSTrace", pProperties, EVENT_TRACE_CONTROL_STOP); // Stop previous if any
+        ULONG status = StartTraceW(&hTrace, L"TDSTrace", pProperties);
         if (status != ERROR_SUCCESS) return false;
 
         status = EnableTraceEx2(hTrace, &TI_PROVIDER_GUID, EVENT_CONTROL_CODE_ENABLE_PROVIDER, 
@@ -44,7 +44,7 @@ public:
     }
 
     void Stop() {
-        ControlTraceW(hTrace, L"NexusTrace", pProperties, EVENT_TRACE_CONTROL_STOP);
+        ControlTraceW(hTrace, L"TDSTrace", pProperties, EVENT_TRACE_CONTROL_STOP);
         free(pProperties);
     }
 };

@@ -1,6 +1,6 @@
-# CONTRIBUTING: Nexus Intelligence EDR v4.0
+# CONTRIBUTING: Threat Detection Suite v4.0
 
-Welcome to the Nexus Intelligence EDR project. Contributing to a kernel-level security tool requires rigorous engineering standards and a focus on system stability.
+Welcome to the Threat Detection Suite project. Contributing to a kernel-level security tool requires rigorous engineering standards and a focus on system stability.
 
 ## Engineering Standards
 
@@ -17,7 +17,7 @@ Welcome to the Nexus Intelligence EDR project. Contributing to a kernel-level se
 - **Stability:** Kernel crashes (BSOD) are unacceptable. Thoroughly test all driver changes in a virtualized environment with a debugger attached.
 
 ### 3. Behavioral Correlation & ETW
-- When adding new detection logic to `NexusEngine`, ensure it is modular and well-documented.
+- When adding new detection logic to `TDSEngine`, ensure it is modular and well-documented.
 - ETW event consumers should be efficient to minimize system overhead.
 
 ## Development Workflow

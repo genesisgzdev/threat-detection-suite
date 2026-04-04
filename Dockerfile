@@ -12,4 +12,4 @@ RUN cmake -B build -S .
 RUN cmake --build build --config Release
 
 # Output binaries will be in /app/build/Release
-CMD ["NexusService.exe"]
+CMD ["ThreatDetectionService.exe"]

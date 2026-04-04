@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: Nexus Intelligence EDR v4.0 - Automated Build Script (Windows)
+:: Threat Detection Suite v4.0 - Automated Build Script (Windows)
 :: Requirements: Visual Studio 2022, WDK, CMake
 
-echo [*] Initializing Nexus EDR Build Process...
+echo [*] Initializing Threat Detection Suite Build Process...
 
 :: Check for Visual Studio environment
 if "%VCINSTALLDIR%" == "" (
@@ -39,16 +39,16 @@ if %errorlevel% neq 0 (
 cd ..
 
 :: 2. Build Kernel-Mode Driver with MSBuild
-echo [*] Building Kernel-Mode Driver (NexusKernel)...
-cd NexusEDR\driver
-msbuild NexusKernel.vcxproj /p:Configuration=Release /p:Platform=x64 /t:Rebuild
+echo [*] Building Kernel-Mode Driver (ThreatDetectionKernel)...
+cd ThreatDetectionSuite\driver
+msbuild ThreatDetectionKernel.vcxproj /p:Configuration=Release /p:Platform=x64 /t:Rebuild
 if %errorlevel% neq 0 (
     echo [!] Driver build failed.
     exit /b %errorlevel%
 )
 cd ..\..
 
-echo [CORE] Nexus Intelligence EDR Build Complete.
+echo [CORE] Threat Detection Suite Build Complete.
 echo [INFO] Binaries: build\bin\Release\
-echo [INFO] Driver: NexusEDR\driver\x64\Release\NexusKernel.sys
+echo [INFO] Driver: ThreatDetectionSuite\driver\x64\Release\ThreatDetectionKernel.sys
 exit /b 0

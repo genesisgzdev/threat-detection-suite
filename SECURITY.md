@@ -1,10 +1,10 @@
-# SECURITY POLICY: Nexus Intelligence EDR v4.0
+# SECURITY POLICY: Threat Detection Suite v4.0
 
-Nexus Intelligence EDR is a high-security tool operating at the kernel level. We take the security of this software and its users with the utmost seriousness.
+Threat Detection Suite is a high-security tool operating at the kernel level. We take the security of this software and its users with the utmost seriousness.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Nexus Intelligence EDR, please do **NOT** open a public issue. Instead, report it through our responsible disclosure process:
+If you discover a security vulnerability in Threat Detection Suite, please do **NOT** open a public issue. Instead, report it through our responsible disclosure process:
 
 1.  **Direct Communication:** Send an email to `security-nexus@example.com`.
 2.  **Encrypted Communication:** We highly recommend using PGP to encrypt your report. Our public PGP key can be found in the [security/](security/) directory of this repository (Fingerprint: `0xDEADBEEF12345678`).
@@ -13,9 +13,9 @@ If you discover a security vulnerability in Nexus Intelligence EDR, please do **
 ## Scope
 
 This security policy covers:
-- **NexusKernel Driver:** IOCTL handlers, memory management, and callback implementations.
-- **NexusService:** Service-to-driver communication, ETW parsing, and command execution.
-- **NexusEngine:** Behavioral correlation logic and detection algorithms.
+- **ThreatDetectionKernel Driver:** IOCTL handlers, memory management, and callback implementations.
+- **ThreatDetectionService:** Service-to-driver communication, ETW parsing, and command execution.
+- **TDSEngine:** Behavioral correlation logic and detection algorithms.
 - **IPC Protocols:** Any communication between the various components of the EDR.
 
 ## Our Commitment
@@ -31,4 +31,4 @@ This security policy covers:
 - Do not disclose the vulnerability publicly until a fix has been released.
 - Give us a reasonable amount of time to address the issue before making it public.
 
-Thank you for helping us keep Nexus Intelligence EDR secure.
+Thank you for helping us keep Threat Detection Suite secure.

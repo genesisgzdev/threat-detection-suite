@@ -1,6 +1,6 @@
 #include <ntddk.h>
 #include <wdf.h>
-#include "../common/NexusCommon.h"
+#include "../common/TDSCommon.h"
 
 //
 // Global state
@@ -12,7 +12,7 @@ PVOID g_ObRegistrationHandle = NULL;
 PKEVENT g_UserEvent = NULL;
 BOOLEAN g_MonitoringActive = FALSE;
 
-OB_PRE_CALLBACK_STATUS NexusPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
+OB_PRE_CALLBACK_STATUS TDSreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
     UNREFERENCED_PARAMETER(RegistrationContext);
 
     if (OperationInformation->ObjectType == *PsProcessType) {
@@ -32,19 +32,19 @@ OB_PRE_CALLBACK_STATUS NexusPreCallback(PVOID RegistrationContext, POB_PRE_OPERA
                 // Log handle access to LSASS
                 // if (IsLsass(targetProcess)) ...
                 
-                PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPool, sizeof(EVENT_ITEM) + sizeof(NEXUS_HANDLE_EVENT), 'sxuN');
+                PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPool, sizeof(EVENT_ITEM) + sizeof(TDS_HANDLE_EVENT), 'sxuN');
                 if (item) {
-                    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(NEXUS_HANDLE_EVENT));
-                    item->Event.Type = NexusEventHandleOp;
+                    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_HANDLE_EVENT));
+                    item->Event.Type = TDSEventHandleOp;
                     item->Event.ProcessId = HandleToUlong(PsGetCurrentProcessId());
                     KeQuerySystemTimePrecise(&item->Event.Timestamp);
                     
-                    PNEXUS_HANDLE_EVENT hEvent = (PNEXUS_HANDLE_EVENT)(&item->Event);
+                    PTDS_HANDLE_EVENT hEvent = (PTDS_HANDLE_EVENT)(&item->Event);
                     hEvent->TargetProcessId = targetPid;
                     hEvent->DesiredAccess = OperationInformation->Parameters->CreateHandleInformation.OriginalDesiredAccess;
                     hEvent->IsThread = FALSE;
                     
-                    QueueNexusEvent(item);
+                    QueueTDSEvent(item);
                 }
             }
         }
@@ -66,7 +66,7 @@ NTSTATUS RegisterObCallbacks() {
     RtlZeroMemory(&opRegistration, sizeof(opRegistration));
     opRegistration.ObjectType = PsProcessType;
     opRegistration.Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
-    opRegistration.PreOperation = NexusPreCallback;
+    opRegistration.PreOperation = TDSreCallback;
     opRegistration.PostOperation = NULL;
 
     obRegistration.OperationRegistration = &opRegistration;
@@ -77,7 +77,7 @@ NTSTATUS RegisterObCallbacks() {
 
 typedef struct _EVENT_ITEM {
     LIST_ENTRY ListEntry;
-    NEXUS_EVENT_HEADER Event;
+    TDS_EVENT_HEADER Event;
     // Data follows header...
 } EVENT_ITEM, *PEVENT_ITEM;
 
@@ -86,8 +86,8 @@ typedef struct _EVENT_ITEM {
 //
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 VOID DriverUnload(PDRIVER_OBJECT DriverObject);
-NTSTATUS NexusDispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp);
-NTSTATUS NexusDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+NTSTATUS TDSispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+NTSTATUS TDSispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 
 //
 // Callbacks (to be implemented in next turn)
@@ -107,8 +107,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
     NTSTATUS status;
     UNICODE_STRING deviceName, symLink;
 
-    RtlInitUnicodeString(&deviceName, L"\\Device\\NexusEDR");
-    RtlInitUnicodeString(&symLink, L"\\DosDevices\\NexusEDR");
+    RtlInitUnicodeString(&deviceName, L"\\Device\\ThreatDetectionSuite");
+    RtlInitUnicodeString(&symLink, L"\\DosDevices\\ThreatDetectionSuite");
 
     status = IoCreateDevice(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_DeviceObject);
     if (!NT_SUCCESS(status)) return status;
@@ -120,9 +120,9 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
     }
 
     DriverObject->DriverUnload = DriverUnload;
-    DriverObject->MajorFunction[IRP_MJ_CREATE] = NexusDispatchCreateClose;
-    DriverObject->MajorFunction[IRP_MJ_CLOSE] = NexusDispatchCreateClose;
-    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = NexusDispatchDeviceControl;
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = TDSispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = TDSispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = TDSispatchDeviceControl;
 
     InitializeListHead(&g_EventQueueHead);
     KeInitializeSpinLock(&g_EventQueueLock);
@@ -138,7 +138,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 
     if (NT_SUCCESS(status)) {
         g_MonitoringActive = TRUE;
-        DbgPrint("NexusEDR: Driver loaded and monitoring active.\n");
+        DbgPrint("ThreatDetectionSuite: Driver loaded and monitoring active.\n");
     }
 
     return status;
@@ -146,7 +146,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     UNICODE_STRING symLink;
-    RtlInitUnicodeString(&symLink, L"\\DosDevices\\NexusEDR");
+    RtlInitUnicodeString(&symLink, L"\\DosDevices\\ThreatDetectionSuite");
     IoDeleteSymbolicLink(&symLink);
 
     PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
@@ -165,10 +165,10 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     KeReleaseSpinLock(&g_EventQueueLock, irql);
 
     IoDeleteDevice(g_DeviceObject);
-    DbgPrint("NexusEDR: Driver unloaded.\n");
+    DbgPrint("ThreatDetectionSuite: Driver unloaded.\n");
 }
 
-NTSTATUS NexusDispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
+NTSTATUS TDSispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     UNREFERENCED_PARAMETER(DeviceObject);
     Irp->IoStatus.Status = STATUS_SUCCESS;
     Irp->IoStatus.Information = 0;
@@ -176,14 +176,14 @@ NTSTATUS NexusDispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     return STATUS_SUCCESS;
 }
 
-NTSTATUS NexusDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
+NTSTATUS TDSispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     UNREFERENCED_PARAMETER(DeviceObject);
     PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
     NTSTATUS status = STATUS_INVALID_DEVICE_REQUEST;
     ULONG info = 0;
 
     switch (irpSp->Parameters.DeviceIoControl.IoControlCode) {
-        case IOCTL_NEXUS_REGISTER_EVENT_EVENT:
+        case IOCTL_TDS_REGISTER_EVENT_EVENT:
             if (irpSp->Parameters.DeviceIoControl.InputBufferLength >= sizeof(HANDLE)) {
                 HANDLE hEvent = *(PHANDLE)Irp->AssociatedIrp.SystemBuffer;
                 status = ObReferenceObjectByHandle(hEvent, EVENT_MODIFY_STATE, *ExEventObjectType, UserMode, (PVOID*)&g_UserEvent, NULL);
@@ -191,7 +191,7 @@ NTSTATUS NexusDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
             }
             break;
 
-        case IOCTL_NEXUS_GET_NEXT_EVENT:
+        case IOCTL_TDS_GET_NEXT_EVENT:
             // Pop event from queue and copy to userland buffer
             KIRQL irql;
             KeAcquireSpinLock(&g_EventQueueLock, &irql);
@@ -200,7 +200,7 @@ NTSTATUS NexusDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
                 PEVENT_ITEM item = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
                 KeReleaseSpinLock(&g_EventQueueLock, irql);
 
-                ULONG size = sizeof(NEXUS_EVENT_HEADER); // Simplify for now
+                ULONG size = sizeof(TDS_EVENT_HEADER); // Simplify for now
                 if (irpSp->Parameters.DeviceIoControl.OutputBufferLength >= size) {
                     RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, &item->Event, size);
                     status = STATUS_SUCCESS;
@@ -225,7 +225,7 @@ NTSTATUS NexusDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 //
 // Helper: Queue event and signal userland
 //
-void QueueNexusEvent(PEVENT_ITEM item) {
+void QueueTDSEvent(PEVENT_ITEM item) {
     KIRQL irql;
     KeAcquireSpinLock(&g_EventQueueLock, &irql);
     InsertTailList(&g_EventQueueHead, &item->ListEntry);
@@ -239,16 +239,16 @@ void QueueNexusEvent(PEVENT_ITEM item) {
 void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo) {
     UNREFERENCED_PARAMETER(Process);
     
-    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPool, sizeof(EVENT_ITEM) + sizeof(NEXUS_PROCESS_EVENT), 'sxuN');
+    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPool, sizeof(EVENT_ITEM) + sizeof(TDS_PROCESS_EVENT), 'sxuN');
     if (!item) return;
 
-    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(NEXUS_PROCESS_EVENT));
-    item->Event.Type = CreateInfo ? NexusEventProcessCreate : NexusEventProcessTerminate;
+    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_PROCESS_EVENT));
+    item->Event.Type = CreateInfo ? TDSEventProcessCreate : TDSEventProcessTerminate;
     item->Event.ProcessId = HandleToUlong(ProcessId);
     KeQuerySystemTimePrecise(&item->Event.Timestamp);
 
     if (CreateInfo) {
-        PNEXUS_PROCESS_EVENT pEvent = (PNEXUS_PROCESS_EVENT)(&item->Event);
+        PTDS_PROCESS_EVENT pEvent = (PTDS_PROCESS_EVENT)(&item->Event);
         pEvent->Create = TRUE;
         pEvent->ParentProcessId = HandleToUlong(CreateInfo->ParentProcessId);
         
@@ -263,19 +263,19 @@ void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTI
         }
     }
 
-    QueueNexusEvent(item);
+    QueueTDSEvent(item);
 }
 
 void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo) {
-    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPool, sizeof(EVENT_ITEM) + sizeof(NEXUS_IMAGE_LOAD_EVENT), 'sxuN');
+    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPool, sizeof(EVENT_ITEM) + sizeof(TDS_IMAGE_LOAD_EVENT), 'sxuN');
     if (!item) return;
 
-    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(NEXUS_IMAGE_LOAD_EVENT));
-    item->Event.Type = NexusEventImageLoad;
+    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_IMAGE_LOAD_EVENT));
+    item->Event.Type = TDSEventImageLoad;
     item->Event.ProcessId = HandleToUlong(ProcessId);
     KeQuerySystemTimePrecise(&item->Event.Timestamp);
 
-    PNEXUS_IMAGE_LOAD_EVENT iEvent = (PNEXUS_IMAGE_LOAD_EVENT)(&item->Event);
+    PTDS_IMAGE_LOAD_EVENT iEvent = (PTDS_IMAGE_LOAD_EVENT)(&item->Event);
     iEvent->LoadAddress = ImageInfo->ImageBase;
     iEvent->ImageSize = ImageInfo->ImageSize;
 
@@ -284,6 +284,6 @@ void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIM
                       min(FullImageName->Length, sizeof(iEvent->ImagePath) - 2));
     }
 
-    QueueNexusEvent(item);
+    QueueTDSEvent(item);
 }
 
