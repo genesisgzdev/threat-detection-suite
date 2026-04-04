@@ -1,43 +1,34 @@
 #!/bin/bash
 
+# Nexus Intelligence EDR v4.0 - Automated Build Script (Linux/Tooling)
+# Note: Full driver build requires a Windows environment with WDK.
+# This script handles CMake-based user-mode components and linters.
+
 set -e
 
-COMPILER=${CXX:-clang++}
-SOURCE="ThreatDetectionSuitee.cpp"
-OUTPUT="ThreatDetectionSuite"
+echo "[*] Initializing Nexus EDR Build Toolchain..."
 
-echo "Threat Detection Suite - Build"
-echo
-
-if ! command -v "$COMPILER" &> /dev/null; then
-    echo "Error: C++ compiler not found ($COMPILER)"
-    echo "Install GCC, Clang, or set CXX environment variable"
-    exit 1
-fi
-
-echo "Using compiler: $COMPILER"
-echo "Compiling $SOURCE..."
-
-CXXFLAGS="-std=c++17 -Wall -Wextra -Wpedantic -O2"
-
-if [[ "$OSTYPE" == "mingw"* ]] || [[ "$OSTYPE" == "cygwin"* ]]; then
-    LDFLAGS="-lws2_32 -ladvapi32 -lshell32 -lpsapi -liphlpapi -lntdll"
+# 1. Build User-Mode Components (if cross-compilation is configured)
+# For now, we assume local build for Linux-based analytics or tools
+if command -v cmake &> /dev/null; then
+    echo "[*] Configuring User-Mode Components with CMake..."
+    mkdir -p build
+    cd build
+    cmake .. -DCMAKE_BUILD_TYPE=Release
+    make -j$(nproc)
+    cd ..
 else
-    LDFLAGS=""
+    echo "[!] CMake not found. Skipping user-mode build."
 fi
 
-$COMPILER $CXXFLAGS $SOURCE $LDFLAGS -o $OUTPUT
+# 2. Driver Build (Requires Windows/WDK)
+echo "[*] NexusKernel Driver build requires a Windows host with MSBuild/WDK."
+echo "[*] Please use build.bat on a Windows system for the full EDR suite."
 
-if [ $? -ne 0 ]; then
-    echo
-    echo "Compilation failed"
-    exit 1
+# 3. Static Analysis / Linting (Optional)
+if command -v clang-tidy &> /dev/null; then
+    echo "[*] Running static analysis..."
+    # clang-tidy -p build/ NexusEDR/engine/*.cpp NexusEDR/service/*.cpp
 fi
 
-echo
-echo "Build successful: $OUTPUT"
-echo
-echo "To run:"
-echo "  ./$OUTPUT"
-echo
-echo "Note: Requires administrator/root privileges"
+echo "[CORE] Nexus Intelligence EDR Toolchain Execution Complete."

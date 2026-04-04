@@ -5,14 +5,18 @@ charset = utf-8
 end_of_line = crlf
 insert_final_newline = true
 trim_trailing_whitespace = true
-
-[*.{cpp,h,hpp,c}]
 indent_style = space
 indent_size = 4
-max_line_length = 120
+
+[*.{cpp,h,hpp,c}]
+# Strict C++17 and C11/C18 standards
+cpp_standard = c++17
+c_standard = c11
+max_line_length = 100
+column_limit = 100
+indent_brace_style = Allman
 
 [*.{bat,sh,bash}]
-indent_style = space
 indent_size = 2
 end_of_line = auto
 
@@ -20,13 +24,8 @@ end_of_line = auto
 trim_trailing_whitespace = false
 max_line_length = off
 
-[*.{txt,log}]
-trim_trailing_whitespace = false
-
-[*.yml,*.yaml]
-indent_style = space
+[*.{yml,yaml,json}]
 indent_size = 2
 
-[*.json]
-indent_style = space
-indent_size = 2
+[Makefile]
+indent_style = tab

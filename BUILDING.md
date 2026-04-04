@@ -1,149 +1,63 @@
-# Building Threat Detection Suite
+# BUILDING: Nexus Intelligence EDR v4.0
 
-## Requirements
+This guide provides instructions for building the Nexus Intelligence EDR suite from source. The project uses a modular build process involving CMake for user-mode components and the Windows Driver Kit (WDK) for the kernel-mode driver.
 
-- Windows 7 SP1 or later (for execution)
-- C++17 capable compiler
-- 50MB disk space
+## Prerequisites
 
-## Windows (MSVC)
+- **Windows 10/11:** Required for both development and execution.
+- **Visual Studio 2022:** Community, Professional, or Enterprise.
+- **Windows Driver Kit (WDK):** Ensure it matches your installed Windows SDK version.
+- **CMake 3.20+:** For managing the build process of user-mode components.
+- **Git:** For version control.
 
-### Method 1: Batch Script
+## Build Process
 
-Open Visual Studio x64 Native Tools Command Prompt and run:
-
-```cmd
-build.bat
+### 1. Clone the Repository
+```powershell
+git clone https://github.com/example/threat-detection-suite-repo.git
+cd threat-detection-suite-repo
 ```
 
-This will compile ThreatDetectionSuite.exe in the current directory.
+### 2. Build User-Mode Components (Service, Engine, Scanner)
+We use CMake to generate the build files for the user-mode components.
 
-### Method 2: Manual Compilation
-
-```cmd
-cl.exe /EHsc /std:latest /W4 /permissive- /O2 ThreatDetectionSuitee.cpp ^
-    /link ws2_32.lib advapi32.lib shell32.lib psapi.lib iphlpapi.lib ntdll.lib ^
-    /OUT:ThreatDetectionSuite.exe
-```
-
-### Method 3: CMake
-
-```cmd
+```powershell
 mkdir build
 cd build
-cmake -G "Visual Studio 16 2019" -A x64 ..
+cmake .. -G "Visual Studio 17 2022" -A x64
 cmake --build . --config Release
 ```
 
-Output: build\Release\ThreatDetectionSuite.exe
+The resulting binaries (e.g., `NexusService.exe`) will be located in the `bin/Release` directory.
 
-### Method 4: Makefile
+### 3. Build Kernel-Mode Driver (NexusKernel)
+The driver must be built using the MSBuild system provided by the WDK.
 
-Requires MSVC tools in PATH:
-
-```cmd
-nmake /f Makefile
+```powershell
+cd NexusEDR/driver
+msbuild NexusKernel.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
-## Linux/Unix (GCC/Clang)
+The resulting driver file (`NexusKernel.sys`) will be in the `x64/Release` directory.
 
-### Method 1: Shell Script
+### 4. Code Signing
+Kernel-mode drivers must be signed to be loaded on 64-bit Windows systems. For development, you can use a self-signed certificate and enable Test Signing mode.
 
-```bash
-chmod +x build.sh
-./build.sh
+```powershell
+# Enable Test Signing (Requires Reboot)
+bcdedit /set testsigning on
+
+# Sign the driver with a test certificate (Placeholder)
+signtool sign /v /s PrivateCertStore /n "NexusTestCert" /t http://timestamp.digicert.com x64/Release/NexusKernel.sys
 ```
 
-### Method 2: Manual Compilation
+## Modular Build Scripts
+You can also use the provided build scripts for a more automated process:
 
-```bash
-g++ -std=c++17 -Wall -Wextra -Wpedantic -O2 ThreatDetectionSuitee.cpp -o ThreatDetectionSuite
-```
-
-Or with Clang:
-
-```bash
-clang++ -std=c++17 -Wall -Wextra -Wpedantic -O2 ThreatDetectionSuitee.cpp -o ThreatDetectionSuite
-```
-
-### Method 3: CMake
-
-```bash
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make
-```
-
-## Verification
-
-After compilation, verify the executable exists:
-
-Windows:
-```cmd
-dir ThreatDetectionSuite.exe
-```
-
-Linux:
-```bash
-ls -la ThreatDetectionSuite
-```
-
-## Execution
-
-Windows (requires admin):
-```cmd
-ThreatDetectionSuite.exe
-```
-
-Linux (requires root):
-```bash
-sudo ./ThreatDetectionSuite
-```
-
-## Compilation Flags
-
-### MSVC Flags
-- `/EHsc`: Enable C++ exception handling
-- `/std:latest`: Use latest C++ standard
-- `/W4`: Enable level 4 warnings
-- `/permissive-`: Strict standard conformance
-- `/O2`: Optimize for speed
-
-### GCC/Clang Flags
-- `-std=c++17`: C++17 standard
-- `-Wall`: Enable all warnings
-- `-Wextra`: Enable extra warnings
-- `-Wpedantic`: Enable pedantic warnings
-- `-O2`: Optimize for speed
-
-## Library Dependencies
-
-### Windows (Linked automatically)
-- ws2_32.lib: Winsock2 (networking)
-- advapi32.lib: Registry and security APIs
-- shell32.lib: Shell utilities (folder paths)
-- psapi.lib: Process API
-- iphlpapi.lib: IP helper (TCP tables)
-- ntdll.lib: Native API (PEB parsing)
+- **Windows:** `build.bat`
+- **Linux (Cross-compilation/Tooling):** `build.sh` (Note: Full driver build requires Windows environment).
 
 ## Troubleshooting
-
-### MSVC Compiler Not Found
-- Ensure you're using "x64 Native Tools Command Prompt for VS"
-- Or add MSVC to PATH manually
-
-### Missing Libraries
-- Windows: Libraries should be built-in with MSVC
-- Linux: Install build-essential package
-
-### Compilation Errors
-- Ensure C++17 support
-- Check for typos in command
-- Review CMakeLists.txt or Makefile
-
-## Cross-Compilation Notes
-
-Note: This is a Windows-specific tool. Linux compilation provided for compatibility only.
-
-Full functionality requires Windows API calls and will not work on non-Windows platforms.
+- **Missing WDK:** Ensure the WDK extension for Visual Studio is installed.
+- **CMake Errors:** Verify that the Windows SDK is correctly detected by CMake.
+- **Driver Loading Failures:** Check the Windows Event Log or use `DbgView` for kernel-mode debug messages.
