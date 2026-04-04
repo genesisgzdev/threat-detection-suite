@@ -36,6 +36,8 @@ void TDSEngine::Start() {
 
 void TDSEngine::Shutdown() {
     m_running = false;
+    // FIX: Properly signal the EventBus CV on shutdown (Issue 20)
+    if (m_eventBus) m_eventBus->Stop();
     if (m_analysisThread.joinable()) {
         m_analysisThread.join();
     }
@@ -61,38 +63,48 @@ void TDSEngine::EvaluateThreat(const Event& event) {
     
     switch (event.Type) {
         case TDSEventProcessCreate: {
-            auto data = std::get<ProcessEvent>(event.Data);
-            if (IsLolbasBinary(data.ImagePath)) {
-                int score = CalculateLOLBinRiskScore(data.CommandLine);
-                if (score >= 85) {
-                    std::string cmd(data.CommandLine.begin(), data.CommandLine.end());
-                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin abuse detected", cmd, event.Pid);
-                    m_contextManager->UpdateScore(event.Pid, score);
-                } else if (score >= 50) {
-                    std::string cmd(data.CommandLine.begin(), data.CommandLine.end());
-                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "Suspicious LOLBin execution", cmd, event.Pid);
-                    m_contextManager->UpdateScore(event.Pid, score);
+            // FIX: Safe variant access with get_if to prevent exception (Issue 21)
+            if (auto data = std::get_if<ProcessEvent>(&event.Data)) {
+                if (IsLolbasBinary(data->ImagePath)) {
+                    int score = CalculateLOLBinRiskScore(data->CommandLine);
+                    if (score >= 85) {
+                        std::string cmd(data->CommandLine.begin(), data->CommandLine.end());
+                        Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin abuse detected", cmd, event.Pid);
+                        m_contextManager->UpdateScore(event.Pid, score);
+                    } else if (score >= 50) {
+                        std::string cmd(data->CommandLine.begin(), data->CommandLine.end());
+                        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "Suspicious LOLBin execution", cmd, event.Pid);
+                        m_contextManager->UpdateScore(event.Pid, score);
+                    }
                 }
             }
             break;
         }
         case TDSEventRemoteThread: {
-            auto data = std::get<RemoteThreadEvent>(event.Data);
-            Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Remote thread injection detected", "Target PID: " + std::to_string(data.TargetPid), event.Pid);
-            m_contextManager->UpdateScore(data.TargetPid, 50);
+            if (auto data = std::get_if<RemoteThreadEvent>(&event.Data)) {
+                Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Remote thread injection detected", "Target PID: " + std::to_string(data->TargetPid), event.Pid);
+                m_contextManager->UpdateScore(data->TargetPid, 50);
+            }
             break;
         }
         case TDSEventHandleOp: {
-            auto data = std::get<HandleOpEvent>(event.Data);
-            if (data.DesiredAccess & PROCESS_VM_READ) {
-                Logger::Instance().LogThreat(TDS_SEVERITY_MEDIUM, CAT_CREDENTIAL_THEFT, "Suspicious handle to sensitive process", "Target PID: " + std::to_string(data.TargetPid), event.Pid);
-                m_contextManager->UpdateScore(event.Pid, 15);
+            if (auto data = std::get_if<HandleOpEvent>(&event.Data)) {
+                if (data->DesiredAccess & PROCESS_VM_READ) {
+                    Logger::Instance().LogThreat(TDS_SEVERITY_MEDIUM, CAT_CREDENTIAL_THEFT, "Suspicious handle to sensitive process", "Target PID: " + std::to_string(data->TargetPid), event.Pid);
+                    m_contextManager->UpdateScore(event.Pid, 15);
+                }
             }
             break;
         }
         case TDSEventNetworkConnect: {
-            auto data = std::get<NetworkEvent>(event.Data);
-            NetworkDetector::AnalyzeConnection(event.Pid, data.RemoteAddress, data.RemotePort);
+            if (auto data = std::get_if<NetworkEvent>(&event.Data)) {
+                TDS_NETWORK_EVENT_DATA netData = {};
+                netData.AddressFamily = AF_INET; // Simplified mapping; Event struct needs AF field
+                netData.Ipv4Address = data->RemoteAddress;
+                netData.RemotePort = data->RemotePort;
+                netData.Protocol = data->Protocol;
+                NetworkDetector::AnalyzeConnection(event.Pid, netData);
+            }
             break;
         }
     }
@@ -118,7 +130,8 @@ int TDSEngine::CalculateLOLBinRiskScore(const std::wstring& commandLine) {
     if (lower.find(L"downloadstring") != std::wstring::npos || lower.find(L"downloadfile") != std::wstring::npos) score += 40;
     if (lower.find(L"http") != std::wstring::npos) score += 15;
 
-    if (lower.find(L"regsvr32") != std::wstring::npos && lower.find(L"/i:http") != std::wstring::npos) score += 85;
+    // FIX: Squiblydoo requires /i: not just /i:http (Issue 18)
+    if (lower.find(L"regsvr32") != std::wstring::npos && (lower.find(L"/i:http") != std::wstring::npos || lower.find(L"/i:") != std::wstring::npos)) score += 85;
 
     if (lower.find(L"-noprofile") != std::wstring::npos) score += 10;
     if (lower.find(L"hidden") != std::wstring::npos) score += 20;
@@ -159,7 +172,14 @@ void TDSEngine::ScanProcessBehaviors() {
             std::wstring exeName = pe32.szExeFile;
             std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
 
-            if (exeName.find(L"svchost") != std::wstring::npos || exeName.find(L"audio") != std::wstring::npos) {
+            // FIX: Expanded target process filter (Issue 22)
+            if (exeName.find(L"svchost") != std::wstring::npos || 
+                exeName.find(L"audio") != std::wstring::npos ||
+                exeName.find(L"explorer") != std::wstring::npos ||
+                exeName.find(L"lsass") != std::wstring::npos ||
+                exeName.find(L"spoolsv") != std::wstring::npos ||
+                exeName.find(L"winlogon") != std::wstring::npos) {
+                
                 HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pe32.th32ProcessID);
                 if (hProc) {
                     DWORD needed = 0;
@@ -182,7 +202,8 @@ void TDSEngine::ScanProcessBehaviors() {
 void TDSEngine::UpdateNetworkStats(DWORD pid, double latency) {
     std::lock_guard<std::mutex> lock(m_engineMutex);
     m_networkMetrics[pid].Push(latency);
-    if (m_networkMetrics[pid].Variance() < 0.05 && m_networkMetrics[pid].m_n > 5) {
+    // FIX: Use Coefficient of Variation (CoV) instead of raw Variance (Issue 19)
+    if (m_networkMetrics[pid].CoV() < 0.3 && m_networkMetrics[pid].m_n > 5) {
         Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_C2_COMMUNICATION, "Network beaconing patterns detected", "Low Variance", pid);
         m_contextManager->UpdateScore(pid, 30);
     }

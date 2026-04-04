@@ -7,6 +7,7 @@
 #include <mutex>
 #include <memory>
 #include <wrl/client.h>
+#include <cmath>
 #include "../TDSCommon/TDSCommon.h"
 #include "../TDSCommon/TDSEvents.h"
 #include "EventBus.h"
@@ -14,8 +15,6 @@
 #include "correlator/SequenceCorrelator.h"
 
 namespace TDS {
-
-using Microsoft::WRL::ComPtr;
 
 struct CaseInsensitiveHash {
     size_t operator()(const std::wstring& s) const {
@@ -31,8 +30,9 @@ struct CaseInsensitiveEqual {
     }
 };
 
+// FIX: Use uint64_t for observation count and provide CoV (Issues 19, 23)
 struct BeaconMetrics {
-    double m_n = 0;
+    uint64_t m_n = 0;
     double m_oldM = 0, m_newM = 0;
     double m_oldS = 0, m_newS = 0;
 
@@ -50,6 +50,7 @@ struct BeaconMetrics {
     }
 
     double Variance() const { return (m_n > 1) ? m_newS / (m_n - 1) : 0.0; }
+    double CoV() const { return (m_newM > 0) ? (std::sqrt(Variance()) / m_newM) : 0.0; }
 };
 
 class TDSEngine {

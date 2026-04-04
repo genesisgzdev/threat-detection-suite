@@ -15,8 +15,9 @@
 
 #define TDS_DEVICE_TYPE 0x8000
 
+// FIX: Change to METHOD_BUFFERED (Issue 16)
 #define IOCTL_TDS_GET_NEXT_EVENT \
-    CTL_CODE(TDS_DEVICE_TYPE, 0x810, METHOD_OUT_BUFFER, FILE_ANY_ACCESS)
+    CTL_CODE(TDS_DEVICE_TYPE, 0x810, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 #define IOCTL_TDS_SET_PROTECTION_POLICY \
     CTL_CODE(TDS_DEVICE_TYPE, 0x811, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -64,9 +65,11 @@ typedef enum _TDS_THREAT_CATEGORY {
     CAT_C2_COMMUNICATION, 
     CAT_KERNEL_ANOMALY, 
     CAT_ROOTKIT_INDICATOR, 
-    CAT_EVASION,
-    CAT_MAX_CATEGORY
+    CAT_EVASION
+    // FIX: Removed CAT_MAX_CATEGORY to prevent accidental OOB array usage in kernel (Issue 17)
 } TDS_THREAT_CATEGORY;
+
+#define TDS_MAX_THREAT_CATEGORY 16
 
 typedef enum _TDS_REMEDIATION_ACTION {
     ACTION_KILL_PROCESS,
@@ -80,10 +83,15 @@ typedef enum _TDS_REMEDIATION_ACTION {
     ACTION_MAX_REMEDIATION
 } TDS_REMEDIATION_ACTION;
 
+// FIX: Support IPv6 structure (Issue 48)
 typedef struct _TDS_NETWORK_EVENT_DATA {
-    uint32_t RemoteAddress;
-    uint16_t RemotePort;
+    uint8_t AddressFamily; // AF_INET or AF_INET6
     uint8_t Protocol;
+    uint16_t RemotePort;
+    union {
+        uint32_t Ipv4Address;
+        uint8_t Ipv6Address[16];
+    };
 } TDS_NETWORK_EVENT_DATA, *PTDS_NETWORK_EVENT_DATA;
 
 typedef struct _TDS_REMOTE_THREAD_DATA {
@@ -145,7 +153,7 @@ inline const char* GetTDSCategoryName(TDS_THREAT_CATEGORY category) {
         "CREDENTIAL_THEFT", "HOOK_DETECTION", "LOLBIN_ABUSE", "PERSISTENCE",
         "C2_COMMUNICATION", "KERNEL_ANOMALY", "ROOTKIT_INDICATOR", "EVASION"
     };
-    if ((int)category >= 0 && (int)category < (int)CAT_MAX_CATEGORY) {
+    if ((int)category >= 0 && (int)category < TDS_MAX_THREAT_CATEGORY) {
         return category_names[category];
     }
     return "UNKNOWN_CATEGORY";
@@ -159,6 +167,7 @@ inline const char* GetTDSSeverityName(TDS_THREAT_SEVERITY severity) {
 }
 #endif
 
+// FIX: Placed OUTSIDE of #pragma pack(push, 1) (Issue 14)
 #ifndef _KERNEL_MODE
 #include <atomic>
 struct TDS_USER_METRICS {

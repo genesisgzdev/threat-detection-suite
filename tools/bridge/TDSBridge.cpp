@@ -22,7 +22,7 @@
 
 #define TDS_DRIVER_DEVICE_NAME "\\\\.\\ThreatDetectionKernel"
 
-static bool global_monitoring_active = true;
+static std::atomic<bool> global_monitoring_active{true}; // FIX: Thread-safe monitoring flag (Issue 49)
 
 class TDSBridge {
 public:

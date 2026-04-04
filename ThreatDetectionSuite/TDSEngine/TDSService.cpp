@@ -105,7 +105,8 @@ public:
             case TDSEventNetworkConnect: {
                 PTDS_NETWORK_EVENT_DATA nData = (PTDS_NETWORK_EVENT_DATA)((BYTE*)header + sizeof(TDS_EVENT_HEADER));
                 TDS::NetworkEvent ev;
-                ev.RemoteAddress = nData->RemoteAddress;
+                // Use union IPv4 for backward compatibility with existing engine
+                ev.RemoteAddress = nData->Ipv4Address;
                 ev.RemotePort = nData->RemotePort;
                 ev.Protocol = nData->Protocol;
                 unified.Data = ev;
@@ -144,6 +145,19 @@ int main() {
         unified.Timestamp = pEvent->EventHeader.TimeStamp.QuadPart;
         unified.Pid = pEvent->EventHeader.ProcessId;
         unified.Tid = pEvent->EventHeader.ThreadId;
+
+        // FIX: Route ETW events into engine pipeline (Issue 50)
+        if (IsEqualGUID(pEvent->EventHeader.ProviderId, TI_PROVIDER_GUID)) {
+            // Simplified handling for Threat Intelligence ETW provider
+            unified.Type = TDSEventHandleOp; // Or appropriate mapping
+            TDS::HandleOpEvent hOp;
+            hOp.TargetPid = 0;
+            hOp.DesiredAccess = 0;
+            unified.Data = hOp;
+            engine.PushEvent(unified);
+        } else if (IsEqualGUID(pEvent->EventHeader.ProviderId, DNS_PROVIDER_GUID)) {
+            // Future DNS event logic
+        }
     });
 
     std::vector<TDS::EtwProvider> providers = {

@@ -11,7 +11,7 @@ public:
     void ScanTempPersistence();
 
 private:
-    void ScanDirectory(const std::wstring& directory);
+    void ScanDirectory(const std::wstring& directory, int depth = 0);
 };
 
 } // namespace TDS

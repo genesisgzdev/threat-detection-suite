@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <wintrust.h>
 #include <softpub.h>
+#include <vector>
 #include "../Logger.h"
 
 #pragma comment(lib, "wintrust.lib")
@@ -25,7 +26,13 @@ void RegistryDetector::ScanAutoRunKeys() {
 bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
     if (path.empty()) return false;
 
-    // Check 1: Authenticode Signature (WinVerifyTrust)
+    // FIX: White list safe unsigned binaries to avoid false positives (Issue 33)
+    std::wstring lowerPath = path;
+    std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+    if (lowerPath.find(L"putty.exe") != std::wstring::npos || lowerPath.find(L"notepad++.exe") != std::wstring::npos) {
+        return false;
+    }
+
     WINTRUST_FILE_INFO fileData;
     ZeroMemory(&fileData, sizeof(fileData));
     fileData.cbStruct = sizeof(WINTRUST_FILE_INFO);
@@ -39,7 +46,10 @@ bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
     trustData.pPolicyCallbackData = NULL;
     trustData.pSIPClientData = NULL;
     trustData.dwUIChoice = WTD_UI_NONE;
-    trustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+    
+    // FIX: Proper revocation checks (Issue 32)
+    trustData.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN; 
+    
     trustData.dwUnionChoice = WTD_CHOICE_FILE;
     trustData.dwStateAction = WTD_STATEACTION_VERIFY;
     trustData.hWVTStateData = NULL;
@@ -55,7 +65,7 @@ bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
     WinVerifyTrust(NULL, &policyGUID, &trustData);
 
     if (status != ERROR_SUCCESS) {
-        // Not trusted / unsigned
+        // Not trusted / unsigned / revoked
         return true;
     }
 
@@ -68,34 +78,51 @@ void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {
 
     DWORD index = 0;
     WCHAR valueName[256];
-    BYTE valueData[1024];
-    DWORD nameLen, dataLen, type;
+    
+    // FIX: Dynamic buffer for value data to handle large registry values (Issue 36)
+    DWORD dataLen = 1024;
+    std::vector<BYTE> valueData(dataLen);
+    
+    DWORD nameLen, type;
 
     while (true) {
         nameLen = sizeof(valueName) / sizeof(WCHAR);
-        dataLen = sizeof(valueData);
+        dataLen = (DWORD)valueData.size();
         
-        LONG result = RegEnumValueW(hKey, index, valueName, &nameLen, NULL, &type, valueData, &dataLen);
+        LONG result = RegEnumValueW(hKey, index, valueName, &nameLen, NULL, &type, valueData.data(), &dataLen);
         
-        if (result == ERROR_SUCCESS) {
+        if (result == ERROR_MORE_DATA) {
+            valueData.resize(dataLen);
+            continue; // Retry with larger buffer
+        } else if (result == ERROR_SUCCESS) {
             if (type == REG_SZ || type == REG_EXPAND_SZ) {
-                std::wstring path = reinterpret_cast<WCHAR*>(valueData);
+                std::wstring path = reinterpret_cast<WCHAR*>(valueData.data());
+                
                 // Strip quotes if present
                 if (path.length() >= 2 && path.front() == L'\"' && path.back() == L'\"') {
                     path = path.substr(1, path.length() - 2);
                 }
+
+                // FIX: Expand environment variables for paths containing % (Issues 34, 35)
+                if (path.find(L"%") != std::wstring::npos) {
+                    WCHAR expandedPath[MAX_PATH];
+                    DWORD expLen = ExpandEnvironmentStringsW(path.c_str(), expandedPath, MAX_PATH);
+                    if (expLen > 0 && expLen < MAX_PATH) {
+                        path = expandedPath;
+                    }
+                }
                 
                 if (IsMaliciousPath(path)) {
-                    std::string desc = "Unsigned binary in AutoRun registry: " + std::string(subKey.begin(), subKey.end());
+                    std::string desc = "Unsigned/Revoked binary in AutoRun registry: " + std::string(subKey.begin(), subKey.end());
                     std::string ioc = std::string(path.begin(), path.end());
                     Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, desc, ioc, 0);
                 }
             }
             index++;
-        } else if (result == ERROR_MORE_DATA) {
-            index++;
+            // Reset buffer size for next iteration just in case
+            valueData.resize(1024);
         } else {
-            break;
+            break; // No more items or access denied
         }
     }
 

@@ -7,21 +7,30 @@
 
 namespace TDS {
 
-void NetworkDetector::AnalyzeConnection(uint32_t pid, uint32_t remoteIp, uint16_t remotePort) {
-    if (IsSuspiciousPort(remotePort)) {
-        IN_ADDR addr;
-        addr.S_un.S_addr = remoteIp;
-        char ipStr[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &addr, ipStr, sizeof(ipStr));
+void NetworkDetector::AnalyzeConnection(uint32_t pid, const TDS_NETWORK_EVENT_DATA& data) {
+    if (IsSuspiciousPort(data.RemotePort)) {
+        char ipStr[INET6_ADDRSTRLEN] = {0};
+
+        // FIX: IPv6 Support (Issue 48)
+        if (data.AddressFamily == AF_INET) {
+            IN_ADDR addr;
+            addr.S_un.S_addr = data.Ipv4Address;
+            inet_ntop(AF_INET, &addr, ipStr, sizeof(ipStr));
+        } else if (data.AddressFamily == AF_INET6) {
+            IN6_ADDR addr;
+            memcpy(addr.u.Byte, data.Ipv6Address, 16);
+            inet_ntop(AF_INET6, &addr, ipStr, sizeof(ipStr));
+        }
         
-        std::string desc = "Suspicious C2 connection on port " + std::to_string(remotePort);
+        std::string desc = "Suspicious C2 connection on port " + std::to_string(data.RemotePort);
         Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_C2_COMMUNICATION, desc, ipStr, pid);
     }
 }
 
 bool NetworkDetector::IsSuspiciousPort(USHORT port) {
+    // FIX: Include standard C2 ports (80, 443) and remove script-kiddie only ports (Issue 47)
     static const std::vector<USHORT> suspiciousPorts = {
-        4444, 5555, 6666, 7777, 8888, 9999, 31337, 12345, 666, 1337
+        80, 443, 8080, 8443, 4444, 8888
     };
     for (USHORT p : suspiciousPorts) {
         if (port == p) return true;

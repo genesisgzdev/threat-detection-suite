@@ -5,6 +5,7 @@
 #include <iostream>
 #include <wrl/client.h>
 #include <vector>
+#include <algorithm>
 #include "../../TDSScanner/Entropy.h"
 #include "../Logger.h"
 
@@ -24,26 +25,44 @@ void PersistenceDetector::ScanWmiSubscriptions() {
     hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\SUBSCRIPTION"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
     if (FAILED(hr)) return;
 
-    ComPtr<IEnumWbemClassObject> pEnumerator;
-    hr = pSvc->ExecQuery(bstr_t("WQL"), bstr_t("SELECT * FROM __EventFilter"), 
-                         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
+    // FIX: Comprehensive WMI scanning covering Consumers and Bindings (Issue 37)
+    const std::vector<std::wstring> classes = {
+        L"__EventFilter",
+        L"CommandLineEventConsumer",
+        L"ActiveScriptEventConsumer",
+        L"__FilterToConsumerBinding"
+    };
 
-    if (SUCCEEDED(hr)) {
-        IWbemClassObject* pclsObj = NULL;
-        ULONG uReturn = 0;
-        while (pEnumerator) {
-            hr = pEnumerator->Next(WAIT_OBJECT_0, 1, &pclsObj, &uReturn);
-            if (0 == uReturn) break;
+    for (const auto& wmiClass : classes) {
+        ComPtr<IEnumWbemClassObject> pEnumerator;
+        std::wstring query = L"SELECT * FROM " + wmiClass;
+        hr = pSvc->ExecQuery(bstr_t("WQL"), bstr_t(query.c_str()), 
+                             WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
 
-            VARIANT vtProp;
-            pclsObj->Get(L"Name", 0, &vtProp, 0, 0);
-            if (vtProp.vt == VT_BSTR) {
-                std::wstring name = vtProp.bstrVal;
-                std::string sName(name.begin(), name.end());
-                Logger::Instance().LogThreat(TDS_SEVERITY_MEDIUM, CAT_PERSISTENCE, "WMI Event Filter detected: " + sName, "WMI", 0);
+        if (SUCCEEDED(hr)) {
+            IWbemClassObject* pclsObj = NULL;
+            ULONG uReturn = 0;
+            while (pEnumerator) {
+                hr = pEnumerator->Next(WAIT_OBJECT_0, 1, &pclsObj, &uReturn);
+                if (0 == uReturn) break;
+
+                VARIANT vtProp;
+                // Get Name or CommandLineTemplate depending on the class
+                if (SUCCEEDED(pclsObj->Get(L"Name", 0, &vtProp, 0, 0)) && vtProp.vt == VT_BSTR) {
+                    std::wstring name = vtProp.bstrVal;
+                    std::string sName(name.begin(), name.end());
+                    std::string className(wmiClass.begin(), wmiClass.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_PERSISTENCE, "WMI Persistence Object: " + className, sName, 0);
+                    VariantClear(&vtProp);
+                } else if (SUCCEEDED(pclsObj->Get(L"CommandLineTemplate", 0, &vtProp, 0, 0)) && vtProp.vt == VT_BSTR) {
+                    std::wstring cmd = vtProp.bstrVal;
+                    std::string sCmd(cmd.begin(), cmd.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PERSISTENCE, "WMI CommandLine Consumer", sCmd, 0);
+                    VariantClear(&vtProp);
+                }
+                
+                pclsObj->Release();
             }
-            VariantClear(&vtProp);
-            pclsObj->Release();
         }
     }
 }
@@ -66,10 +85,49 @@ void PersistenceDetector::ScanScheduledTasks() {
                 for (LONG i = 1; i <= numTasks; i++) {
                     ComPtr<IRegisteredTask> pTask;
                     if (SUCCEEDED(pTaskCollection->get_Item(_variant_t(i), &pTask))) {
-                        BSTR taskName;
-                        pTask->get_Name(&taskName);
-                        // Process task actions for LOLBins...
-                        SysFreeString(taskName);
+                        ComPtr<ITaskDefinition> pDef;
+                        if (SUCCEEDED(pTask->get_Definition(&pDef))) {
+                            ComPtr<IActionCollection> pActions;
+                            if (SUCCEEDED(pDef->get_Actions(&pActions))) {
+                                LONG numActions = 0;
+                                pActions->get_Count(&numActions);
+                                
+                                // FIX: Process task actions to find LOLBins or suspicious paths (Issue 38)
+                                for (LONG j = 1; j <= numActions; j++) {
+                                    ComPtr<IAction> pAction;
+                                    if (SUCCEEDED(pActions->get_Item(j, &pAction))) {
+                                        TASK_ACTION_TYPE type;
+                                        pAction->get_Type(&type);
+                                        if (type == TASK_ACTION_EXEC) {
+                                            ComPtr<IExecAction> pExecAction;
+                                            if (SUCCEEDED(pAction.As(&pExecAction))) {
+                                                BSTR bPath, bArgs;
+                                                pExecAction->get_Path(&bPath);
+                                                pExecAction->get_Arguments(&bArgs);
+                                                
+                                                std::wstring path = bPath ? bPath : L"";
+                                                std::wstring args = bArgs ? bArgs : L"";
+                                                std::wstring lowerPath = path;
+                                                std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+                                                
+                                                if (lowerPath.find(L"powershell.exe") != std::wstring::npos ||
+                                                    lowerPath.find(L"cmd.exe") != std::wstring::npos ||
+                                                    lowerPath.find(L"certutil.exe") != std::wstring::npos ||
+                                                    lowerPath.find(L"mshta.exe") != std::wstring::npos ||
+                                                    lowerPath.find(L"regsvr32.exe") != std::wstring::npos) {
+                                                    
+                                                    std::string fullCmd = std::string(path.begin(), path.end()) + " " + std::string(args.begin(), args.end());
+                                                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "LOLBin Scheduled Task Execution", fullCmd, 0);
+                                                }
+                                                
+                                                if (bPath) SysFreeString(bPath);
+                                                if (bArgs) SysFreeString(bArgs);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -81,9 +139,24 @@ void PersistenceDetector::ScanTempPersistence() {
     WCHAR tempPath[MAX_PATH];
     GetTempPathW(MAX_PATH, tempPath);
     ScanDirectory(tempPath);
+
+    // FIX: Comprehensive scanning including system temp and ProgramData (Issue 40)
+    WCHAR sysTempPath[MAX_PATH];
+    if (GetEnvironmentVariableW(L"SystemRoot", sysTempPath, MAX_PATH)) {
+        std::wstring winTemp = std::wstring(sysTempPath) + L"\\Temp";
+        ScanDirectory(winTemp);
+    }
+    
+    WCHAR programDataPath[MAX_PATH];
+    if (GetEnvironmentVariableW(L"ProgramData", programDataPath, MAX_PATH)) {
+        ScanDirectory(programDataPath);
+    }
 }
 
-void PersistenceDetector::ScanDirectory(const std::wstring& directory) {
+void PersistenceDetector::ScanDirectory(const std::wstring& directory, int depth) {
+    // FIX: Recursion limit to prevent stack overflow from deep hierarchies or symlinks (Issue 39)
+    if (depth > 8) return; 
+
     std::wstring searchPath = directory + L"\\*.*";
     WIN32_FIND_DATAW findData;
     HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
@@ -97,7 +170,7 @@ void PersistenceDetector::ScanDirectory(const std::wstring& directory) {
         std::wstring fullPath = directory + L"\\" + findData.cFileName;
 
         if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            ScanDirectory(fullPath);
+            ScanDirectory(fullPath, depth + 1);
         } else {
             ULONGLONG fileSize = (static_cast<ULONGLONG>(findData.nFileSizeHigh) << 32) | findData.nFileSizeLow;
             
@@ -107,7 +180,7 @@ void PersistenceDetector::ScanDirectory(const std::wstring& directory) {
 
                 if (isHidden && isSystem) {
                     std::string fPath(fullPath.begin(), fullPath.end());
-                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PERSISTENCE, "Hidden+System file detected in temp", fPath, 0);
+                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PERSISTENCE, "Hidden+System file detected in temp/system dir", fPath, 0);
                 }
 
                 if (Entropy::IsFileHighEntropy(fullPath)) {
