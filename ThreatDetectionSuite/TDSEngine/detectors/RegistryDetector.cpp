@@ -21,6 +21,115 @@ void RegistryDetector::ScanAutoRunKeys() {
         ScanKey(HKEY_CURRENT_USER, key);
         ScanKey(HKEY_LOCAL_MACHINE, key);
     }
+
+    ScanCOMHijacking();
+    ScanAppInitDLLs();
+}
+
+void RegistryDetector::ScanCOMHijacking() {
+    // FIX: Detect COM hijacking by comparing HKCU vs HKLM CLSIDs (Issue 12)
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD index = 0;
+        WCHAR clsid[256];
+        DWORD clsidLen = sizeof(clsid) / sizeof(WCHAR);
+
+        while (RegEnumKeyExW(hKey, index, clsid, &clsidLen, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
+            std::wstring subKey = L"Software\\Classes\\CLSID\\" + std::wstring(clsid) + L"\\InprocServer32";
+            HKEY hSubKey;
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, subKey.c_str(), 0, KEY_READ, &hSubKey) == ERROR_SUCCESS) {
+                WCHAR path[MAX_PATH];
+                DWORD pathLen = sizeof(path);
+                if (RegQueryValueExW(hSubKey, NULL, NULL, NULL, (LPBYTE)path, &pathLen) == ERROR_SUCCESS) {
+                    // Entry exists in HKCU, check if it's shadowing HKLM
+                    HKEY hLmKey;
+                    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subKey.c_str(), 0, KEY_READ, &hLmKey) == ERROR_SUCCESS) {
+                        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, 
+                            "Potential COM Hijack: HKCU entry shadowing HKLM", std::string(clsid, clsid + clsidLen), 0);
+                        RegCloseKey(hLmKey);
+                    }
+                }
+                RegCloseKey(hSubKey);
+            }
+            index++;
+            clsidLen = sizeof(clsid) / sizeof(WCHAR);
+        }
+        RegCloseKey(hKey);
+    }
+}
+
+void RegistryDetector::ScanAppInitDLLs() {
+    // FIX: Monitor AppInit_DLLs (Issue 13)
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        WCHAR dlls[1024];
+        DWORD dllsLen = sizeof(dlls);
+        if (RegQueryValueExW(hKey, L"AppInit_DLLs", NULL, NULL, (LPBYTE)dlls, &dllsLen) == ERROR_SUCCESS) {
+            if (dllsLen > sizeof(WCHAR)) { // Not empty
+                std::wstring path = dlls;
+                std::string sPath(path.begin(), path.end());
+                Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_REGISTRY_ANOMALY, 
+                    "Suspicious AppInit_DLLs entry detected", sPath, 0);
+            }
+        }
+        RegCloseKey(hKey);
+    }
+}
+
+    ScanCOMHijacking();
+    ScanAppInitDLLs();
+}
+
+void RegistryDetector::ScanCOMHijacking() {
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\CLSID", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD index = 0;
+        WCHAR subKeyName[256];
+        DWORD nameLen = sizeof(subKeyName) / sizeof(WCHAR);
+
+        while (RegEnumKeyExW(hKey, index, subKeyName, &nameLen, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
+            std::wstring clsidPath = L"Software\\Classes\\CLSID\\";
+            clsidPath += subKeyName;
+            clsidPath += L"\\InprocServer32";
+
+            HKEY hSubKey;
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, clsidPath.c_str(), 0, KEY_READ, &hSubKey) == ERROR_SUCCESS) {
+                WCHAR value[1024];
+                DWORD size = sizeof(value);
+                DWORD type;
+                if (RegQueryValueExW(hSubKey, NULL, NULL, &type, (LPBYTE)value, &size) == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ)) {
+                    std::wstring path(value);
+                    if (IsMaliciousPath(path)) {
+                        std::string sPath(path.begin(), path.end());
+                        std::string sClsid(subKeyName, subKeyName + wcslen(subKeyName));
+                        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, "COM Hijacking detected in HKCU: " + sClsid, sPath, 0);
+                    }
+                }
+                RegCloseKey(hSubKey);
+            }
+
+            index++;
+            nameLen = sizeof(subKeyName) / sizeof(WCHAR);
+        }
+        RegCloseKey(hKey);
+    }
+}
+
+void RegistryDetector::ScanAppInitDLLs() {
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        WCHAR value[1024];
+        DWORD size = sizeof(value);
+        DWORD type;
+        if (RegQueryValueExW(hKey, L"AppInit_DLLs", NULL, &type, (LPBYTE)value, &size) == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ)) {
+            std::wstring dlls(value);
+            if (!dlls.empty()) {
+                std::string sDlls(dlls.begin(), dlls.end());
+                Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, "AppInit_DLLs is set", sDlls, 0);
+            }
+        }
+        RegCloseKey(hKey);
+    }
 }
 
 bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {

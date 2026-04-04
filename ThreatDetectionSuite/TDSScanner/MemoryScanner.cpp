@@ -145,7 +145,50 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
     }
 
     ScanProcessHooks(hProcess);
+    DetectProcessHollowing(hProcess, processName);
     CloseHandle(hProcess);
+void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& processName) {
+    // FIX: Professional Process Hollowing Detection (Issue 10)
+    // 1. Get ImageBaseAddress from PEB
+    PROCESS_BASIC_INFORMATION pbi;
+    if (NT_SUCCESS(NtQueryInformationProcess(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL))) {
+        PEB peb;
+        if (ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) {
+            LPVOID imageBase = peb.ImageBaseAddress;
+            
+            // 2. Read PE headers from memory
+            IMAGE_DOS_HEADER dosHeader;
+            if (ReadProcessMemory(hProcess, imageBase, &dosHeader, sizeof(dosHeader), NULL)) {
+                if (dosHeader.e_magic == IMAGE_DOS_SIGNATURE) {
+                    IMAGE_NT_HEADERS ntHeaders;
+                    if (ReadProcessMemory(hProcess, (PBYTE)imageBase + dosHeader.e_lfanew, &ntHeaders, sizeof(ntHeaders), NULL)) {
+                        if (ntHeaders.Signature == IMAGE_NT_SIGNATURE) {
+                            DWORD memoryTimeStamp = ntHeaders.FileHeader.TimeDateStamp;
+                            
+                            // 3. Read same PE file from disk and compare
+                            HANDLE hFile = CreateFileW(processName.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+                            if (hFile != INVALID_HANDLE_VALUE) {
+                                IMAGE_DOS_HEADER diskDos;
+                                DWORD read;
+                                if (ReadFile(hFile, &diskDos, sizeof(diskDos), &read, NULL) && diskDos.e_magic == IMAGE_DOS_SIGNATURE) {
+                                    SetFilePointer(hFile, diskDos.e_lfanew, NULL, FILE_BEGIN);
+                                    IMAGE_NT_HEADERS diskNt;
+                                    if (ReadFile(hFile, &diskNt, sizeof(diskNt), &read, NULL) && diskNt.Signature == IMAGE_NT_SIGNATURE) {
+                                        if (memoryTimeStamp != diskNt.FileHeader.TimeDateStamp) {
+                                            std::string sName(processName.begin(), processName.end());
+                                            Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PROCESS_BEHAVIOR, 
+                                                "Process Hollowing detected: Memory TimeDateStamp mismatch", sName, GetProcessId(hProcess));
+                                        }
+                                    }
+                                }
+                                CloseHandle(hFile);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 } // namespace TDS

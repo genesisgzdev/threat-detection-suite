@@ -5,12 +5,16 @@
 #include <psapi.h>
 #include <algorithm>
 #include <winternl.h>
+#include <unordered_set>
 #include "Logger.h"
 #include "detectors/NetworkDetector.h"
+
+#pragma comment(lib, "ntdll.lib")
 
 namespace TDS {
 
 typedef NTSTATUS(NTAPI* pNtQueryInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+typedef NTSTATUS(NTAPI* pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 
 TDSEngine::TDSEngine() {
     m_lolbasBinaries = {
@@ -36,7 +40,6 @@ void TDSEngine::Start() {
 
 void TDSEngine::Shutdown() {
     m_running = false;
-    // FIX: Properly signal the EventBus CV on shutdown (Issue 20)
     if (m_eventBus) m_eventBus->Stop();
     if (m_analysisThread.joinable()) {
         m_analysisThread.join();
@@ -63,7 +66,6 @@ void TDSEngine::EvaluateThreat(const Event& event) {
     
     switch (event.Type) {
         case TDSEventProcessCreate: {
-            // FIX: Safe variant access with get_if to prevent exception (Issue 21)
             if (auto data = std::get_if<ProcessEvent>(&event.Data)) {
                 if (IsLolbasBinary(data->ImagePath)) {
                     int score = CalculateLOLBinRiskScore(data->CommandLine);
@@ -99,7 +101,7 @@ void TDSEngine::EvaluateThreat(const Event& event) {
         case TDSEventNetworkConnect: {
             if (auto data = std::get_if<NetworkEvent>(&event.Data)) {
                 TDS_NETWORK_EVENT_DATA netData = {};
-                netData.AddressFamily = AF_INET; // Simplified mapping; Event struct needs AF field
+                netData.AddressFamily = AF_INET; 
                 netData.Ipv4Address = data->RemoteAddress;
                 netData.RemotePort = data->RemotePort;
                 netData.Protocol = data->Protocol;
@@ -130,7 +132,6 @@ int TDSEngine::CalculateLOLBinRiskScore(const std::wstring& commandLine) {
     if (lower.find(L"downloadstring") != std::wstring::npos || lower.find(L"downloadfile") != std::wstring::npos) score += 40;
     if (lower.find(L"http") != std::wstring::npos) score += 15;
 
-    // FIX: Squiblydoo requires /i: not just /i:http (Issue 18)
     if (lower.find(L"regsvr32") != std::wstring::npos && (lower.find(L"/i:http") != std::wstring::npos || lower.find(L"/i:") != std::wstring::npos)) score += 85;
 
     if (lower.find(L"-noprofile") != std::wstring::npos) score += 10;
@@ -153,7 +154,7 @@ void TDSEngine::ScanLOLBins() {
             
             if (exeName == L"certutil.exe" || exeName == L"powershell.exe" || exeName == L"wmic.exe" || exeName == L"regsvr32.exe") {
                 std::string sExe(exeName.begin(), exeName.end());
-                Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_LOLBIN_ABUSE, "LOLBin instance found in memory snapshot (command line handled via kernel)", sExe, pe32.th32ProcessID);
+                Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_LOLBIN_ABUSE, "LOLBin instance found in snapshot", sExe, pe32.th32ProcessID);
             }
         } while (Process32NextW(hSnapshot, &pe32));
     }
@@ -161,48 +162,70 @@ void TDSEngine::ScanLOLBins() {
 }
 
 void TDSEngine::ScanProcessBehaviors() {
+    // FIX: DKOM Detection (Issue 5)
+    std::unordered_set<DWORD> snapshotPids;
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE) return;
-
-    PROCESSENTRY32W pe32;
-    pe32.dwSize = sizeof(PROCESSENTRY32W);
-
-    if (Process32FirstW(hSnapshot, &pe32)) {
-        do {
-            std::wstring exeName = pe32.szExeFile;
-            std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
-
-            // FIX: Expanded target process filter (Issue 22)
-            if (exeName.find(L"svchost") != std::wstring::npos || 
-                exeName.find(L"audio") != std::wstring::npos ||
-                exeName.find(L"explorer") != std::wstring::npos ||
-                exeName.find(L"lsass") != std::wstring::npos ||
-                exeName.find(L"spoolsv") != std::wstring::npos ||
-                exeName.find(L"winlogon") != std::wstring::npos) {
+    if (hSnapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W pe32;
+        pe32.dwSize = sizeof(PROCESSENTRY32W);
+        if (Process32FirstW(hSnapshot, &pe32)) {
+            do {
+                snapshotPids.insert(pe32.th32ProcessID);
                 
-                HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pe32.th32ProcessID);
-                if (hProc) {
-                    DWORD needed = 0;
-                    EnumProcessModules(hProc, NULL, 0, &needed);
-                    int dll_count = needed / sizeof(HMODULE);
+                std::wstring exeName = pe32.szExeFile;
+                std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
 
-                    int threshold = (exeName.find(L"svchost") != std::wstring::npos) ? 150 : 80;
-                    if (dll_count > threshold) {
-                        std::string sExe(exeName.begin(), exeName.end());
-                        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Abnormally high DLL count in core process", sExe, pe32.th32ProcessID);
+                if (exeName.find(L"svchost") != std::wstring::npos || 
+                    exeName.find(L"audio") != std::wstring::npos ||
+                    exeName.find(L"explorer") != std::wstring::npos ||
+                    exeName.find(L"lsass") != std::wstring::npos ||
+                    exeName.find(L"spoolsv") != std::wstring::npos ||
+                    exeName.find(L"winlogon") != std::wstring::npos) {
+                    
+                    HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pe32.th32ProcessID);
+                    if (hProc) {
+                        DWORD needed = 0;
+                        EnumProcessModules(hProc, NULL, 0, &needed);
+                        int dll_count = needed / sizeof(HMODULE);
+
+                        int threshold = (exeName.find(L"svchost") != std::wstring::npos) ? 150 : 80;
+                        if (dll_count > threshold) {
+                            std::string sExe(exeName.begin(), exeName.end());
+                            Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Abnormally high DLL count in core process", sExe, pe32.th32ProcessID);
+                        }
+                        CloseHandle(hProc);
                     }
-                    CloseHandle(hProc);
                 }
-            }
-        } while (Process32NextW(hSnapshot, &pe32));
+            } while (Process32NextW(hSnapshot, &pe32));
+        }
+        CloseHandle(hSnapshot);
     }
-    CloseHandle(hSnapshot);
+
+    // 2. Query SystemProcessInformation for cross-check (DKOM detection)
+    static pNtQuerySystemInformation NtQuerySysInfo = (pNtQuerySystemInformation)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQuerySystemInformation");
+    if (NtQuerySysInfo) {
+        ULONG size = 0;
+        NtQuerySysInfo(SystemProcessInformation, NULL, 0, &size);
+        std::vector<BYTE> buffer(size);
+        if (NT_SUCCESS(NtQuerySysInfo(SystemProcessInformation, buffer.data(), size, NULL))) {
+            PSYSTEM_PROCESS_INFORMATION pInfo = (PSYSTEM_PROCESS_INFORMATION)buffer.data();
+            while (true) {
+                DWORD pid = (DWORD)(ULONG_PTR)pInfo->UniqueProcessId;
+                if (pid != 0 && snapshotPids.find(pid) == snapshotPids.end()) {
+                    std::wstring name = pInfo->ImageName.Buffer ? std::wstring(pInfo->ImageName.Buffer, pInfo->ImageName.Length / sizeof(WCHAR)) : L"Unknown";
+                    std::string sName(name.begin(), name.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_DKOM_DETECTION, "Process hidden from standard APIs (DKOM)", sName, pid);
+                }
+                if (pInfo->NextEntryOffset == 0) break;
+                pInfo = (PSYSTEM_PROCESS_INFORMATION)((PBYTE)pInfo + pInfo->NextEntryOffset);
+            }
+        }
+    }
 }
 
 void TDSEngine::UpdateNetworkStats(DWORD pid, double latency) {
     std::lock_guard<std::mutex> lock(m_engineMutex);
     m_networkMetrics[pid].Push(latency);
-    // FIX: Use Coefficient of Variation (CoV) instead of raw Variance (Issue 19)
     if (m_networkMetrics[pid].CoV() < 0.3 && m_networkMetrics[pid].m_n > 5) {
         Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_C2_COMMUNICATION, "Network beaconing patterns detected", "Low Variance", pid);
         m_contextManager->UpdateScore(pid, 30);

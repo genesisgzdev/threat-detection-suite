@@ -1,5 +1,6 @@
 #include <ntifs.h>
 #include <ntddk.h>
+#include <fltKernel.h>
 #include <fwpsk.h>
 #include <fwpmk.h>
 #include <initguid.h>
@@ -8,6 +9,7 @@
 NTKERNELAPI PVOID NTAPI PsGetProcessWow64Process(_In_ PEPROCESS Process);
 
 PDEVICE_OBJECT g_DeviceObject = NULL;
+PFLT_FILTER g_FilterHandle = NULL;
 
 KSPIN_LOCK g_IrpQueueLock;
 LIST_ENTRY g_PendingIrpList;
@@ -16,6 +18,7 @@ KSPIN_LOCK g_EventQueueLock;
 LIST_ENTRY g_EventQueueHead;
 
 PVOID g_ObRegistrationHandle = NULL;
+LARGE_INTEGER g_RegistryCookie = {0};
 ULONG g_EdrPid = 0;
 ULONG g_ServicePid = 0; // FIX: Track the PID of the service that opened the device (Issue 11)
 BOOLEAN g_MonitoringActive = FALSE;
@@ -23,11 +26,20 @@ BOOLEAN g_MonitoringActive = FALSE;
 // WFP handles
 HANDLE g_EngineHandle = NULL;
 UINT32 g_CalloutId = 0;
+UINT32 g_CalloutIdV6 = 0;
+UINT32 g_CalloutIdDgV4 = 0;
+UINT32 g_CalloutIdDgV6 = 0;
 UINT64 g_FilterId = 0;
+UINT64 g_FilterIdV6 = 0;
+UINT64 g_FilterIdDgV4 = 0;
+UINT64 g_FilterIdDgV6 = 0;
 
 // FIX: Unique GUID for WFP Callout (Issue 9)
 // {B2A1C3D4-E5F6-4A7B-8C9D-E0F1A2B3C4D5}
 DEFINE_GUID(TDS_WFP_CALLOUT_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd5);
+DEFINE_GUID(TDS_WFP_CALLOUT_V6_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd6);
+DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V4_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd7);
+DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V6_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd8);
 
 typedef struct _TDS_PENDING_IRP {
     LIST_ENTRY ListEntry;
@@ -48,6 +60,8 @@ NTSTATUS TDSDispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo);
 void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo);
+void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create);
+NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument2);
 
 PVOID GetProcessPeb(PEPROCESS Process) {
     PVOID peb = PsGetProcessWow64Process(Process);
@@ -161,7 +175,6 @@ void WfpClassifyOutbound(
 {
     UNREFERENCED_PARAMETER(layerData);
     UNREFERENCED_PARAMETER(classifyContext);
-    UNREFERENCED_PARAMETER(filter);
     UNREFERENCED_PARAMETER(flowContext);
 
     classifyOut->actionType = FWP_ACTION_PERMIT;
@@ -184,14 +197,40 @@ void WfpClassifyOutbound(
             KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
 
             PTDS_NETWORK_EVENT_DATA nEvent = (PTDS_NETWORK_EVENT_DATA)(header + 1);
-            if (inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS].value.type == FWP_UINT32) {
-                nEvent->RemoteAddress = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS].value.uint32;
-            }
-            if (inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT].value.type == FWP_UINT16) {
-                nEvent->RemotePort = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT].value.uint16;
-            }
-            if (inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL].value.type == FWP_UINT8) {
-                nEvent->Protocol = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL].value.uint8;
+
+            if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4 || inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V4) {
+                nEvent->AddressFamily = 2; // AF_INET
+                
+                UINT16 addrIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) ? FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS : FWPS_FIELD_DATAGRAM_DATA_V4_IP_REMOTE_ADDRESS;
+                UINT16 portIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) ? FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT : FWPS_FIELD_DATAGRAM_DATA_V4_IP_REMOTE_PORT;
+                UINT16 protoIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) ? FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL : FWPS_FIELD_DATAGRAM_DATA_V4_IP_PROTOCOL;
+
+                if (inFixedValues->incomingValue[addrIdx].value.type == FWP_UINT32) {
+                    nEvent->Ipv4Address = inFixedValues->incomingValue[addrIdx].value.uint32;
+                }
+                if (inFixedValues->incomingValue[portIdx].value.type == FWP_UINT16) {
+                    nEvent->RemotePort = inFixedValues->incomingValue[portIdx].value.uint16;
+                }
+                if (inFixedValues->incomingValue[protoIdx].value.type == FWP_UINT8) {
+                    nEvent->Protocol = inFixedValues->incomingValue[protoIdx].value.uint8;
+                }
+            } 
+            else if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6 || inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V6) {
+                nEvent->AddressFamily = 23; // AF_INET6
+                
+                UINT16 addrIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6) ? FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_ADDRESS : FWPS_FIELD_DATAGRAM_DATA_V6_IP_REMOTE_ADDRESS;
+                UINT16 portIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6) ? FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_PORT : FWPS_FIELD_DATAGRAM_DATA_V6_IP_REMOTE_PORT;
+                UINT16 protoIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6) ? FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_PROTOCOL : FWPS_FIELD_DATAGRAM_DATA_V6_IP_PROTOCOL;
+
+                if (inFixedValues->incomingValue[addrIdx].value.type == FWP_BYTE_ARRAY16_TYPE && inFixedValues->incomingValue[addrIdx].value.byteArray16) {
+                    RtlCopyMemory(nEvent->Ipv6Address, inFixedValues->incomingValue[addrIdx].value.byteArray16->byteArray16, 16);
+                }
+                if (inFixedValues->incomingValue[portIdx].value.type == FWP_UINT16) {
+                    nEvent->RemotePort = inFixedValues->incomingValue[portIdx].value.uint16;
+                }
+                if (inFixedValues->incomingValue[protoIdx].value.type == FWP_UINT8) {
+                    nEvent->Protocol = inFixedValues->incomingValue[protoIdx].value.uint8;
+                }
             }
 
             QueueTDSEvent(item);
@@ -215,47 +254,92 @@ NTSTATUS InitializeWFP(PDEVICE_OBJECT DeviceObject) {
     if (!NT_SUCCESS(status)) return status;
 
     FWPS_CALLOUT0 sCallout = {0};
-    sCallout.calloutKey = TDS_WFP_CALLOUT_GUID;
     sCallout.classifyFn = WfpClassifyOutbound;
     sCallout.notifyFn = WfpNotify;
     
+    sCallout.calloutKey = TDS_WFP_CALLOUT_GUID;
     status = FwpsCalloutRegister0(DeviceObject, &sCallout, &g_CalloutId);
-    if (!NT_SUCCESS(status)) {
-        FwpmEngineClose0(g_EngineHandle);
-        g_EngineHandle = NULL;
-        return status;
-    }
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    sCallout.calloutKey = TDS_WFP_CALLOUT_V6_GUID;
+    status = FwpsCalloutRegister0(DeviceObject, &sCallout, &g_CalloutIdV6);
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    sCallout.calloutKey = TDS_WFP_CALLOUT_DATAGRAM_V4_GUID;
+    status = FwpsCalloutRegister0(DeviceObject, &sCallout, &g_CalloutIdDgV4);
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    sCallout.calloutKey = TDS_WFP_CALLOUT_DATAGRAM_V6_GUID;
+    status = FwpsCalloutRegister0(DeviceObject, &sCallout, &g_CalloutIdDgV6);
+    if (!NT_SUCCESS(status)) goto Cleanup;
 
     FWPM_CALLOUT0 mCallout = {0};
-    mCallout.calloutKey = TDS_WFP_CALLOUT_GUID;
-    mCallout.displayData.name = L"TDS Network Callout";
-    mCallout.applicableLayer = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
     
+    mCallout.calloutKey = TDS_WFP_CALLOUT_GUID;
+    mCallout.displayData.name = L"TDS Network Callout V4";
+    mCallout.applicableLayer = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
     status = FwpmCalloutAdd0(g_EngineHandle, &mCallout, NULL, NULL);
-    if (!NT_SUCCESS(status)) {
-        FwpsCalloutUnregisterById0(g_CalloutId);
-        g_CalloutId = 0;
-        FwpmEngineClose0(g_EngineHandle);
-        g_EngineHandle = NULL;
-        return status;
-    }
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    mCallout.calloutKey = TDS_WFP_CALLOUT_V6_GUID;
+    mCallout.displayData.name = L"TDS Network Callout V6";
+    mCallout.applicableLayer = FWPM_LAYER_ALE_AUTH_CONNECT_V6;
+    status = FwpmCalloutAdd0(g_EngineHandle, &mCallout, NULL, NULL);
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    mCallout.calloutKey = TDS_WFP_CALLOUT_DATAGRAM_V4_GUID;
+    mCallout.displayData.name = L"TDS Datagram Callout V4";
+    mCallout.applicableLayer = FWPM_LAYER_DATAGRAM_DATA_V4;
+    status = FwpmCalloutAdd0(g_EngineHandle, &mCallout, NULL, NULL);
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    mCallout.calloutKey = TDS_WFP_CALLOUT_DATAGRAM_V6_GUID;
+    mCallout.displayData.name = L"TDS Datagram Callout V6";
+    mCallout.applicableLayer = FWPM_LAYER_DATAGRAM_DATA_V6;
+    status = FwpmCalloutAdd0(g_EngineHandle, &mCallout, NULL, NULL);
+    if (!NT_SUCCESS(status)) goto Cleanup;
 
     FWPM_FILTER0 filter = {0};
-    filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
-    filter.displayData.name = L"TDS Network Filter";
     filter.weight.type = FWP_EMPTY;
     filter.action.type = FWP_ACTION_CALLOUT_INSPECTION;
-    filter.action.calloutKey = TDS_WFP_CALLOUT_GUID;
 
+    filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
+    filter.displayData.name = L"TDS Network Filter V4";
+    filter.action.calloutKey = TDS_WFP_CALLOUT_GUID;
     status = FwpmFilterAdd0(g_EngineHandle, &filter, NULL, &g_FilterId);
-    if (!NT_SUCCESS(status)) {
-        // Dynamic session will clean up the mCallout
-        FwpsCalloutUnregisterById0(g_CalloutId);
-        g_CalloutId = 0;
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V6;
+    filter.displayData.name = L"TDS Network Filter V6";
+    filter.action.calloutKey = TDS_WFP_CALLOUT_V6_GUID;
+    status = FwpmFilterAdd0(g_EngineHandle, &filter, NULL, &g_FilterIdV6);
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    filter.layerKey = FWPM_LAYER_DATAGRAM_DATA_V4;
+    filter.displayData.name = L"TDS Datagram Filter V4";
+    filter.action.calloutKey = TDS_WFP_CALLOUT_DATAGRAM_V4_GUID;
+    status = FwpmFilterAdd0(g_EngineHandle, &filter, NULL, &g_FilterIdDgV4);
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    filter.layerKey = FWPM_LAYER_DATAGRAM_DATA_V6;
+    filter.displayData.name = L"TDS Datagram Filter V6";
+    filter.action.calloutKey = TDS_WFP_CALLOUT_DATAGRAM_V6_GUID;
+    status = FwpmFilterAdd0(g_EngineHandle, &filter, NULL, &g_FilterIdDgV6);
+    if (!NT_SUCCESS(status)) goto Cleanup;
+
+    return STATUS_SUCCESS;
+
+Cleanup:
+    if (g_CalloutId) FwpsCalloutUnregisterById0(g_CalloutId);
+    if (g_CalloutIdV6) FwpsCalloutUnregisterById0(g_CalloutIdV6);
+    if (g_CalloutIdDgV4) FwpsCalloutUnregisterById0(g_CalloutIdDgV4);
+    if (g_CalloutIdDgV6) FwpsCalloutUnregisterById0(g_CalloutIdDgV6);
+    g_CalloutId = g_CalloutIdV6 = g_CalloutIdDgV4 = g_CalloutIdDgV6 = 0;
+    
+    if (g_EngineHandle) {
         FwpmEngineClose0(g_EngineHandle);
         g_EngineHandle = NULL;
     }
-
     return status;
 }
 
@@ -283,29 +367,228 @@ OB_PRE_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATI
                 OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
             }
         }
+    } else if (OperationInformation->ObjectType == *PsThreadType) {
+        PETHREAD targetThread = (PETHREAD)OperationInformation->Object;
+        PEPROCESS targetProcess = IoThreadToProcess(targetThread);
+        ULONG targetPid = HandleToUlong(PsGetProcessId(targetProcess));
+        
+        if (g_EdrPid != 0 && targetPid == g_EdrPid) {
+            ACCESS_MASK forbidden = THREAD_TERMINATE | THREAD_SUSPEND_RESUME;
+            if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) {
+                OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
+            } else {
+                OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
+            }
+        }
     }
     return OB_PREOP_SUCCESS;
 }
 
 NTSTATUS RegisterObCallbacks() {
     OB_CALLBACK_REGISTRATION obRegistration;
-    OB_OPERATION_REGISTRATION opRegistration;
+    OB_OPERATION_REGISTRATION opRegistration[2];
 
     RtlZeroMemory(&obRegistration, sizeof(obRegistration));
     obRegistration.Version = OB_FLT_REGISTRATION_VERSION;
-    obRegistration.OperationRegistrationCount = 1;
+    obRegistration.OperationRegistrationCount = 2;
     // FIX: Correct altitude for AV/EDR (Issue 13)
     RtlInitUnicodeString(&obRegistration.Altitude, L"320123");
     obRegistration.RegistrationContext = NULL;
 
-    RtlZeroMemory(&opRegistration, sizeof(opRegistration));
-    opRegistration.ObjectType = PsProcessType;
-    opRegistration.Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
-    opRegistration.PreOperation = TDSPreCallback;
-    opRegistration.PostOperation = NULL;
+    RtlZeroMemory(opRegistration, sizeof(opRegistration));
+    
+    opRegistration[0].ObjectType = PsProcessType;
+    opRegistration[0].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
+    opRegistration[0].PreOperation = TDSPreCallback;
+    opRegistration[0].PostOperation = NULL;
 
-    obRegistration.OperationRegistration = &opRegistration;
+    opRegistration[1].ObjectType = PsThreadType;
+    opRegistration[1].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
+    opRegistration[1].PreOperation = TDSPreCallback;
+    opRegistration[1].PostOperation = NULL;
+
+    obRegistration.OperationRegistration = opRegistration;
     return ObRegisterCallbacks(&obRegistration, &g_ObRegistrationHandle);
+}
+
+NTSTATUS TDSUnloadFilter(_In_ FLT_FILTER_UNLOAD_FLAGS Flags) {
+    UNREFERENCED_PARAMETER(Flags);
+    return STATUS_SUCCESS;
+}
+
+FLT_POSTOP_CALLBACK_STATUS TDSPostCreateCallback(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _In_opt_ PVOID CompletionContext,
+    _In_ FLT_POST_OPERATION_FLAGS Flags
+) {
+    UNREFERENCED_PARAMETER(FltObjects);
+    UNREFERENCED_PARAMETER(CompletionContext);
+    UNREFERENCED_PARAMETER(Flags);
+
+    if (!NT_SUCCESS(Data->IoStatus.Status) || (Data->IoStatus.Information == FILE_DOES_NOT_EXIST)) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
+    BOOLEAN isDelete = FALSE;
+    if (Data->Iopb->Parameters.Create.Options & FILE_DELETE_ON_CLOSE) {
+        isDelete = TRUE;
+    }
+
+    if (isDelete) {
+        PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
+        if (NT_SUCCESS(FltGetFileNameInformation(Data, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT, &nameInfo))) {
+            FltParseFileNameInformation(nameInfo);
+
+            ULONG pathLen = nameInfo->Name.Length;
+            ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen;
+            ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+            PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, totalSize, 'SDTe');
+            if (item) {
+                RtlZeroMemory(item, totalSize);
+                item->TotalSize = totalSize;
+                PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+                header->Type = TDSEventFileDelete;
+                header->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+                header->ThreadId = HandleToUlong(PsGetCurrentThreadId());
+                header->DataSize = dataSize;
+                KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
+
+                PTDS_FILE_EVENT_DATA fData = (PTDS_FILE_EVENT_DATA)(header + 1);
+                fData->Operation = 2; // Delete
+                fData->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA);
+                RtlCopyMemory((PUCHAR)header + fData->FilePathOffset, nameInfo->Name.Buffer, pathLen);
+
+                QueueTDSEvent(item);
+            }
+            FltReleaseFileNameInformation(nameInfo);
+        }
+    }
+
+    return FLT_POSTOP_FINISHED_PROCESSING;
+}
+
+FLT_PREOP_CALLBACK_STATUS TDSPreSetInformationCallback(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Outptr_opt_ PVOID *CompletionContext
+) {
+    UNREFERENCED_PARAMETER(FltObjects);
+    UNREFERENCED_PARAMETER(CompletionContext);
+
+    FILE_INFORMATION_CLASS infoClass = Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
+
+    if (infoClass == FileRenameInformation || infoClass == FileRenameInformationEx ||
+        infoClass == FileDispositionInformation || infoClass == FileDispositionInformationEx) {
+        
+        PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
+        if (NT_SUCCESS(FltGetFileNameInformation(Data, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT, &nameInfo))) {
+            FltParseFileNameInformation(nameInfo);
+
+            ULONG pathLen = nameInfo->Name.Length;
+            ULONG targetLen = 0;
+            
+            if (infoClass == FileRenameInformation || infoClass == FileRenameInformationEx) {
+                PFILE_RENAME_INFORMATION renameInfo = Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+                targetLen = renameInfo->FileNameLength;
+            }
+
+            ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen + targetLen;
+            ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+            PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, totalSize, 'SDTe');
+            if (item) {
+                RtlZeroMemory(item, totalSize);
+                item->TotalSize = totalSize;
+                PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+                header->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+                header->ThreadId = HandleToUlong(PsGetCurrentThreadId());
+                header->DataSize = dataSize;
+                KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
+
+                PTDS_FILE_EVENT_DATA fData = (PTDS_FILE_EVENT_DATA)(header + 1);
+                fData->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA);
+                RtlCopyMemory((PUCHAR)header + fData->FilePathOffset, nameInfo->Name.Buffer, pathLen);
+
+                if (infoClass == FileRenameInformation || infoClass == FileRenameInformationEx) {
+                    header->Type = TDSEventFileOp;
+                    fData->Operation = 3; // Rename
+                    fData->TargetPathOffset = fData->FilePathOffset + pathLen;
+                    PFILE_RENAME_INFORMATION renameInfo = Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+                    RtlCopyMemory((PUCHAR)header + fData->TargetPathOffset, renameInfo->FileName, targetLen);
+                } else {
+                    header->Type = TDSEventFileDelete;
+                    fData->Operation = 2; // Delete
+                }
+
+                QueueTDSEvent(item);
+            }
+            FltReleaseFileNameInformation(nameInfo);
+        }
+    }
+
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+CONST FLT_OPERATION_REGISTRATION Callbacks[] = {
+    { IRP_MJ_CREATE, 0, NULL, TDSPostCreateCallback },
+    { IRP_MJ_SET_INFORMATION, 0, TDSPreSetInformationCallback, NULL },
+    { IRP_MJ_OPERATION_END }
+};
+
+CONST FLT_REGISTRATION FilterRegistration = {
+    sizeof(FLT_REGISTRATION),
+    FLT_REGISTRATION_VERSION,
+    0,
+    NULL,
+    Callbacks,
+    TDSUnloadFilter,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL
+};
+
+NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument2) {
+    UNREFERENCED_PARAMETER(CallbackContext);
+    REG_NOTIFY_CLASS notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)Argument1;
+    
+    if (notifyClass == RegNtPreSetValueKey) {
+        ULONG dataSize = 0;
+        ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER);
+        PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, totalSize, 'SDTe');
+        if (item) {
+            RtlZeroMemory(item, totalSize);
+            item->TotalSize = totalSize;
+
+            PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+            header->Type = TDSEventRegistryOp;
+            header->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+            header->ThreadId = HandleToUlong(PsGetCurrentThreadId());
+            header->DataSize = dataSize;
+            KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
+
+            QueueTDSEvent(item);
+        }
+    }
+    return STATUS_SUCCESS;
+}
+
+void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
+    if (!Create) return;
+    
+    ULONG dataSize = 0;
+    ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER);
+    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, totalSize, 'SDTe');
+    if (!item) return;
+
+    RtlZeroMemory(item, totalSize);
+    item->TotalSize = totalSize;
+
+    PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+    header->Type = TDSEventThreadCreate;
+    header->ProcessId = HandleToUlong(ProcessId);
+    header->ThreadId = HandleToUlong(ThreadId);
+    header->DataSize = dataSize;
+    KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
+
+    QueueTDSEvent(item);
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
@@ -336,13 +619,31 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 
     status = PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, FALSE);
     if (NT_SUCCESS(status)) {
+        status = PsSetCreateThreadNotifyRoutine(ThreadNotifyRoutine);
+    }
+    if (NT_SUCCESS(status)) {
         status = PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
     }
     if (NT_SUCCESS(status)) {
         status = RegisterObCallbacks();
     }
     if (NT_SUCCESS(status)) {
+        UNICODE_STRING altitude;
+        RtlInitUnicodeString(&altitude, L"320123");
+        status = CmRegisterCallbackEx(RegistryCallback, &altitude, DriverObject, NULL, &g_RegistryCookie, NULL);
+    }
+    if (NT_SUCCESS(status)) {
         status = InitializeWFP(g_DeviceObject);
+    }
+    if (NT_SUCCESS(status)) {
+        status = FltRegisterFilter(DriverObject, &FilterRegistration, &g_FilterHandle);
+        if (NT_SUCCESS(status)) {
+            status = FltStartFiltering(g_FilterHandle);
+            if (!NT_SUCCESS(status)) {
+                FltUnregisterFilter(g_FilterHandle);
+                g_FilterHandle = NULL;
+            }
+        }
     }
 
     if (NT_SUCCESS(status)) {
@@ -360,14 +661,25 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     IoDeleteSymbolicLink(&symLink);
 
     PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+    PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine);
     PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine);
     
+    if (g_RegistryCookie.QuadPart != 0) CmUnRegisterCallback(g_RegistryCookie);
+
     if (g_ObRegistrationHandle) ObUnRegisterCallbacks(g_ObRegistrationHandle);
+    
+    if (g_FilterHandle) {
+        FltUnregisterFilter(g_FilterHandle);
+        g_FilterHandle = NULL;
+    }
     
     // FIX: Safe teardown of WFP (Issue 12)
     if (g_EngineHandle) {
         // dynamic session handles filter/callout deletion, but we must unregister the kernel callback
         if (g_CalloutId) FwpsCalloutUnregisterById0(g_CalloutId);
+        if (g_CalloutIdV6) FwpsCalloutUnregisterById0(g_CalloutIdV6);
+        if (g_CalloutIdDgV4) FwpsCalloutUnregisterById0(g_CalloutIdDgV4);
+        if (g_CalloutIdDgV6) FwpsCalloutUnregisterById0(g_CalloutIdDgV6);
         FwpmEngineClose0(g_EngineHandle);
     }
 

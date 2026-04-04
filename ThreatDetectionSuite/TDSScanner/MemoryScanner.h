@@ -11,6 +11,7 @@ class MemoryScanner {
 public:
     static bool DetectNopSleds(HANDLE hProcess, LPVOID startAddress, SIZE_T regionSize);
     static void ScanProcessHooks(HANDLE hProcess);
+    static void DetectProcessHollowing(HANDLE hProcess, const std::wstring& processName);
     static void ScanAllProcesses();
 
 private:

@@ -15,7 +15,6 @@
 
 #define TDS_DEVICE_TYPE 0x8000
 
-// FIX: Change to METHOD_BUFFERED (Issue 16)
 #define IOCTL_TDS_GET_NEXT_EVENT \
     CTL_CODE(TDS_DEVICE_TYPE, 0x810, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
@@ -57,6 +56,7 @@ typedef enum _TDS_THREAT_CATEGORY {
     CAT_REGISTRY_ANOMALY, 
     CAT_NETWORK_ANOMALY,
     CAT_PRIVILEGE_ESC, 
+    CAT_DKOM_DETECTION,
     CAT_ANTI_ANALYSIS, 
     CAT_CREDENTIAL_THEFT,
     CAT_HOOK_DETECTION, 
@@ -66,10 +66,9 @@ typedef enum _TDS_THREAT_CATEGORY {
     CAT_KERNEL_ANOMALY, 
     CAT_ROOTKIT_INDICATOR, 
     CAT_EVASION
-    // FIX: Removed CAT_MAX_CATEGORY to prevent accidental OOB array usage in kernel (Issue 17)
 } TDS_THREAT_CATEGORY;
 
-#define TDS_MAX_THREAT_CATEGORY 16
+#define TDS_MAX_THREAT_CATEGORY 17
 
 typedef enum _TDS_REMEDIATION_ACTION {
     ACTION_KILL_PROCESS,
@@ -83,7 +82,6 @@ typedef enum _TDS_REMEDIATION_ACTION {
     ACTION_MAX_REMEDIATION
 } TDS_REMEDIATION_ACTION;
 
-// FIX: Support IPv6 structure (Issue 48)
 typedef struct _TDS_NETWORK_EVENT_DATA {
     uint8_t AddressFamily; // AF_INET or AF_INET6
     uint8_t Protocol;
@@ -119,6 +117,12 @@ typedef struct _TDS_IMAGE_LOAD_DATA {
     uint32_t ImagePathOffset;
 } TDS_IMAGE_LOAD_DATA, *PTDS_IMAGE_LOAD_DATA;
 
+typedef struct _TDS_FILE_EVENT_DATA {
+    uint8_t Operation; // 1: Create, 2: Delete, 3: Rename
+    uint32_t FilePathOffset;
+    uint32_t TargetPathOffset; // Only for rename
+} TDS_FILE_EVENT_DATA, *PTDS_FILE_EVENT_DATA;
+
 typedef struct _TDS_HANDLE_OP_DATA {
     uint32_t TargetProcessId;
     uint32_t DesiredAccess;
@@ -149,9 +153,10 @@ typedef struct _TDS_REMEDIATION_RESULT {
 inline const char* GetTDSCategoryName(TDS_THREAT_CATEGORY category) {
     static const char* category_names[] = {
         "PROCESS_BEHAVIOR", "DLL_INJECTION", "MEMORY_ANOMALY", "FILE_ANOMALY",
-        "REGISTRY_ANOMALY", "NETWORK_ANOMALY", "PRIVILEGE_ESC", "ANTI_ANALYSIS",
-        "CREDENTIAL_THEFT", "HOOK_DETECTION", "LOLBIN_ABUSE", "PERSISTENCE",
-        "C2_COMMUNICATION", "KERNEL_ANOMALY", "ROOTKIT_INDICATOR", "EVASION"
+        "REGISTRY_ANOMALY", "NETWORK_ANOMALY", "PRIVILEGE_ESC", "DKOM_DETECTION",
+        "ANTI_ANALYSIS", "CREDENTIAL_THEFT", "HOOK_DETECTION", "LOLBIN_ABUSE",
+        "PERSISTENCE", "C2_COMMUNICATION", "KERNEL_ANOMALY", "ROOTKIT_INDICATOR",
+        "EVASION"
     };
     if ((int)category >= 0 && (int)category < TDS_MAX_THREAT_CATEGORY) {
         return category_names[category];
@@ -167,7 +172,6 @@ inline const char* GetTDSSeverityName(TDS_THREAT_SEVERITY severity) {
 }
 #endif
 
-// FIX: Placed OUTSIDE of #pragma pack(push, 1) (Issue 14)
 #ifndef _KERNEL_MODE
 #include <atomic>
 struct TDS_USER_METRICS {

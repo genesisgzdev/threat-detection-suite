@@ -3,24 +3,25 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <string>
 #include "../TDSCommon/TDSCommon.h"
 #include "../TDSCommon/TDSEvents.h"
 #include "TDSEngine.h"
 #include "collectors/EtwCollector.h"
 
-std::atomic<bool> g_Running{ true };
+std::atomic<bool> g_Running{ false };
+
+SERVICE_STATUS        g_ServiceStatus = {0};
+SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
+HANDLE                g_ServiceStopEvent = INVALID_HANDLE_VALUE;
+
+VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv);
+VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode);
+DWORD WINAPI ServiceWorkerThread(LPVOID lpParam);
 
 static const GUID TI_PROVIDER_GUID = { 0xF4E1897C, 0xBB5D, 0x566A, { 0x91, 0x79, 0x06, 0xEE, 0x52, 0x8C, 0x10, 0xFF } };
 static const GUID DNS_PROVIDER_GUID = { 0x22FB2AD3, 0xE18E, 0x418B, { 0x82, 0xC7, 0x47, 0x21, 0x19, 0x50, 0xE8, 0xC0 } };
 static const GUID FILE_PROVIDER_GUID = { 0xEDD08927, 0x9CC4, 0x4E65, { 0xB9, 0x70, 0xC2, 0x56, 0x0F, 0xB5, 0xC2, 0x89 } };
-
-BOOL WINAPI ConsoleHandler(DWORD ctrlType) {
-    if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_CLOSE_EVENT) {
-        g_Running = false;
-        return TRUE;
-    }
-    return FALSE;
-}
 
 class DriverInterface {
     HANDLE m_hDevice;
@@ -130,9 +131,91 @@ public:
     }
 };
 
-int main() {
-    SetConsoleCtrlHandler(ConsoleHandler, TRUE);
-    std::cout << "Threat Detection Suite v4.2.0 - Core Service" << std::endl;
+int wmain(int argc, wchar_t* argv[]) {
+    SERVICE_TABLE_ENTRYW ServiceTable[] = {
+        { (LPWSTR)L"TDSService", (LPSERVICE_MAIN_FUNCTIONW)ServiceMain },
+        { NULL, NULL }
+    };
+
+    if (StartServiceCtrlDispatcherW(ServiceTable) == FALSE) {
+        return GetLastError();
+    }
+
+    return 0;
+}
+
+VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv) {
+    g_StatusHandle = RegisterServiceCtrlHandlerW(L"TDSService", ServiceCtrlHandler);
+
+    if (g_StatusHandle == NULL) {
+        return;
+    }
+
+    ZeroMemory(&g_ServiceStatus, sizeof(g_ServiceStatus));
+    g_ServiceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+    g_ServiceStatus.dwControlsAccepted = 0;
+    g_ServiceStatus.dwCurrentState = SERVICE_START_PENDING;
+    g_ServiceStatus.dwWin32ExitCode = 0;
+    g_ServiceStatus.dwServiceSpecificExitCode = 0;
+    g_ServiceStatus.dwCheckPoint = 0;
+
+    if (SetServiceStatus(g_StatusHandle, &g_ServiceStatus) == FALSE) {
+        return;
+    }
+
+    g_ServiceStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (g_ServiceStopEvent == NULL) {
+        g_ServiceStatus.dwControlsAccepted = 0;
+        g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+        g_ServiceStatus.dwWin32ExitCode = GetLastError();
+        g_ServiceStatus.dwCheckPoint = 1;
+        SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
+        return;
+    }
+
+    g_ServiceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+    g_ServiceStatus.dwCurrentState = SERVICE_RUNNING;
+    g_ServiceStatus.dwWin32ExitCode = 0;
+    g_ServiceStatus.dwCheckPoint = 0;
+
+    if (SetServiceStatus(g_StatusHandle, &g_ServiceStatus) == FALSE) {
+        return;
+    }
+
+    HANDLE hThread = CreateThread(NULL, 0, ServiceWorkerThread, NULL, 0, NULL);
+    if (hThread) {
+        WaitForSingleObject(hThread, INFINITE);
+        CloseHandle(hThread);
+    }
+
+    CloseHandle(g_ServiceStopEvent);
+
+    g_ServiceStatus.dwControlsAccepted = 0;
+    g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+    g_ServiceStatus.dwWin32ExitCode = 0;
+    g_ServiceStatus.dwCheckPoint = 3;
+    SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
+}
+
+VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode) {
+    switch (CtrlCode) {
+        case SERVICE_CONTROL_STOP:
+            g_ServiceStatus.dwWin32ExitCode = 0;
+            g_ServiceStatus.dwCurrentState = SERVICE_STOP_PENDING;
+            g_ServiceStatus.dwCheckPoint = 0;
+            g_ServiceStatus.dwWaitHint = 5000;
+            SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
+
+            g_Running = false;
+            SetEvent(g_ServiceStopEvent);
+            break;
+        default:
+            break;
+    }
+}
+
+DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
+    g_Running = true;
 
     TDS::TDSEngine engine;
     engine.Start();
@@ -146,10 +229,8 @@ int main() {
         unified.Pid = pEvent->EventHeader.ProcessId;
         unified.Tid = pEvent->EventHeader.ThreadId;
 
-        // FIX: Route ETW events into engine pipeline (Issue 50)
         if (IsEqualGUID(pEvent->EventHeader.ProviderId, TI_PROVIDER_GUID)) {
-            // Simplified handling for Threat Intelligence ETW provider
-            unified.Type = TDSEventHandleOp; // Or appropriate mapping
+            unified.Type = TDSEventHandleOp; 
             TDS::HandleOpEvent hOp;
             hOp.TargetPid = 0;
             hOp.DesiredAccess = 0;
@@ -167,26 +248,27 @@ int main() {
     };
 
     if (!etw.Start(providers)) {
-        std::cerr << "[-] Failed to start ETW collector." << std::endl;
+        // ETW start failed
     }
 
     if (!driver.Connect()) {
-        std::cerr << "[-] Critical Error: Could not connect to kernel driver." << std::endl;
-    } else {
-        std::cout << "[*] Kernel telemetry linked." << std::endl;
+        // Driver connect failed
     }
 
     std::thread driverThread([&]() {
         driver.ListenForEvents(engine);
     });
 
+    // Implement a watchdog / self-healing loop
     while (g_Running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        if (WaitForSingleObject(g_ServiceStopEvent, 1000) == WAIT_OBJECT_0) {
+            break;
+        }
     }
 
     etw.Stop();
     engine.Shutdown();
     if (driverThread.joinable()) driverThread.join();
 
-    return 0;
+    return ERROR_SUCCESS;
 }
