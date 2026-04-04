@@ -5,16 +5,20 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Common headers
 include_directories(ThreatDetectionSuite/TDSCommon)
+include_directories(ThreatDetectionSuite/TDSEngine)
+include_directories(ThreatDetectionSuite/TDSScanner)
 
 # Userland Engine
 add_executable(ThreatDetectionService 
-    ThreatDetectionSuite/TDSEngine/ThreatDetectionService.cpp 
+    ThreatDetectionSuite/TDSEngine/TDSService.cpp 
+    ThreatDetectionSuite/TDSEngine/TDSEngine.cpp
     ThreatDetectionSuite/TDSEngine/collectors/EtwCollector.cpp
     ThreatDetectionSuite/TDSEngine/correlator/SequenceCorrelator.cpp
     ThreatDetectionSuite/TDSEngine/detectors/PersistenceDetector.cpp
+    ThreatDetectionSuite/TDSScanner/MemoryScanner.cpp
 )
-target_link_libraries(ThreatDetectionService wbemuuid taskschd comsuppw advapi32)
+target_link_libraries(ThreatDetectionService wbemuuid taskschd comsuppw advapi32 ntdll)
 
-# Driver (Conceptual - usually requires WDK MSBuild or specialized CMake toolchain)
-# add_library(ThreatDetectionSuite_Driver SHARED ThreatDetectionSuite/TDSDriver/TDSDriver.c)
-# set_target_properties(ThreatDetectionSuite_Driver PROPERTIES SUFFIX ".sys")
+# Legacy Bridge / Integration Utility
+add_executable(ThreatDetectionSuiteUtility ThreatDetectionSuite.cpp)
+target_link_libraries(ThreatDetectionSuiteUtility advapi32)
