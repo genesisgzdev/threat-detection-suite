@@ -10,7 +10,7 @@
 #include <iomanip>
 #include <mutex>
 
-// Threat Detection Suite v4.0 Common Headers
+// Threat Detection Suite v4.2.0 Common Headers
 #include "../../ThreatDetectionSuite/TDSCommon/TDSCommon.h"
 #include "../../ThreatDetectionSuite/TDSScanner/MemoryScanner.h"
 #include "../../ThreatDetectionSuite/TDSEngine/detectors/RegistryDetector.h"
@@ -139,7 +139,7 @@ void RunLegacyUserlandScans() {
     
     TDS::MemoryScanner::ScanAllProcesses();
     TDS::RegistryDetector::ScanAutoRunKeys();
-    TDS::NetworkDetector::ScanActiveConnections();
+    // Network connections handled via WFP Kernel Event pipeline now
     
     TDS::PersistenceDetector persistence;
     persistence.ScanWmiSubscriptions();

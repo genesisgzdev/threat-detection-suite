@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <winternl.h>
 #include "Logger.h"
+#include "detectors/NetworkDetector.h"
 
 namespace TDS {
 
@@ -89,6 +90,11 @@ void TDSEngine::EvaluateThreat(const Event& event) {
             }
             break;
         }
+        case TDSEventNetworkConnect: {
+            auto data = std::get<NetworkEvent>(event.Data);
+            NetworkDetector::AnalyzeConnection(event.Pid, data.RemoteAddress, data.RemotePort);
+            break;
+        }
     }
 }
 
@@ -98,29 +104,6 @@ bool TDSEngine::IsLolbasBinary(const std::wstring& path) {
     std::wstring lower = filename;
     for (auto& c : lower) c = towlower(c);
     return m_lolbasBinaries.find(lower) != m_lolbasBinaries.end();
-}
-
-std::wstring TDSEngine::GetProcessCommandLine(DWORD pid) {
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-    if (!hProcess) return L"";
-
-    static pNtQueryInformationProcess NtQueryInfo = (pNtQueryInformationProcess)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
-    if (!NtQueryInfo) { CloseHandle(hProcess); return L""; }
-
-    PROCESS_BASIC_INFORMATION pbi;
-    if (!NT_SUCCESS(NtQueryInfo(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL))) { CloseHandle(hProcess); return L""; }
-
-    PEB peb;
-    if (!ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) { CloseHandle(hProcess); return L""; }
-
-    RTL_USER_PROCESS_PARAMETERS params;
-    if (!ReadProcessMemory(hProcess, peb.ProcessParameters, &params, sizeof(params), NULL)) { CloseHandle(hProcess); return L""; }
-
-    std::vector<wchar_t> buffer(params.CommandLine.Length / sizeof(wchar_t) + 1, 0);
-    if (!ReadProcessMemory(hProcess, params.CommandLine.Buffer, buffer.data(), params.CommandLine.Length, NULL)) { CloseHandle(hProcess); return L""; }
-
-    CloseHandle(hProcess);
-    return std::wstring(buffer.data());
 }
 
 int TDSEngine::CalculateLOLBinRiskScore(const std::wstring& commandLine) {
@@ -156,12 +139,8 @@ void TDSEngine::ScanLOLBins() {
             std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
             
             if (exeName == L"certutil.exe" || exeName == L"powershell.exe" || exeName == L"wmic.exe" || exeName == L"regsvr32.exe") {
-                std::wstring cmdLine = GetProcessCommandLine(pe32.th32ProcessID);
-                int score = CalculateLOLBinRiskScore(cmdLine);
-                if (score >= 85) {
-                    std::string sExe(exeName.begin(), exeName.end());
-                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin threat found in snapshot", sExe, pe32.th32ProcessID);
-                }
+                std::string sExe(exeName.begin(), exeName.end());
+                Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_LOLBIN_ABUSE, "LOLBin instance found in memory snapshot (command line handled via kernel)", sExe, pe32.th32ProcessID);
             }
         } while (Process32NextW(hSnapshot, &pe32));
     }

@@ -1,7 +1,11 @@
 #include "RegistryDetector.h"
 #include <iostream>
 #include <algorithm>
+#include <wintrust.h>
+#include <softpub.h>
 #include "../Logger.h"
+
+#pragma comment(lib, "wintrust.lib")
 
 namespace TDS {
 
@@ -19,16 +23,42 @@ void RegistryDetector::ScanAutoRunKeys() {
 }
 
 bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
-    std::wstring lowerPath = path;
-    std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+    if (path.empty()) return false;
 
-    static const std::vector<std::wstring> patterns = {
-        L"svchost.exe", L"windowsupdate", L"driver.exe", L"spy.exe", L"amsi.dll"
-    };
+    // Check 1: Authenticode Signature (WinVerifyTrust)
+    WINTRUST_FILE_INFO fileData;
+    ZeroMemory(&fileData, sizeof(fileData));
+    fileData.cbStruct = sizeof(WINTRUST_FILE_INFO);
+    fileData.pcwszFilePath = path.c_str();
+    fileData.hFile = NULL;
+    fileData.pgKnownSubject = NULL;
 
-    for (const auto& p : patterns) {
-        if (lowerPath.find(p) != std::wstring::npos) return true;
+    WINTRUST_DATA trustData;
+    ZeroMemory(&trustData, sizeof(trustData));
+    trustData.cbStruct = sizeof(WINTRUST_DATA);
+    trustData.pPolicyCallbackData = NULL;
+    trustData.pSIPClientData = NULL;
+    trustData.dwUIChoice = WTD_UI_NONE;
+    trustData.fdwRevocationChecks = WTD_REVOKE_NONE;
+    trustData.dwUnionChoice = WTD_CHOICE_FILE;
+    trustData.dwStateAction = WTD_STATEACTION_VERIFY;
+    trustData.hWVTStateData = NULL;
+    trustData.pwszURLReference = NULL;
+    trustData.dwUIContext = 0;
+    trustData.pFile = &fileData;
+
+    GUID policyGUID = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+
+    LONG status = WinVerifyTrust(NULL, &policyGUID, &trustData);
+    
+    trustData.dwStateAction = WTD_STATEACTION_CLOSE;
+    WinVerifyTrust(NULL, &policyGUID, &trustData);
+
+    if (status != ERROR_SUCCESS) {
+        // Not trusted / unsigned
+        return true;
     }
+
     return false;
 }
 
@@ -50,10 +80,15 @@ void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {
         if (result == ERROR_SUCCESS) {
             if (type == REG_SZ || type == REG_EXPAND_SZ) {
                 std::wstring path = reinterpret_cast<WCHAR*>(valueData);
+                // Strip quotes if present
+                if (path.length() >= 2 && path.front() == L'\"' && path.back() == L'\"') {
+                    path = path.substr(1, path.length() - 2);
+                }
+                
                 if (IsMaliciousPath(path)) {
-                    std::string desc = "Malicious registry persistence detected in " + std::string(subKey.begin(), subKey.end());
+                    std::string desc = "Unsigned binary in AutoRun registry: " + std::string(subKey.begin(), subKey.end());
                     std::string ioc = std::string(path.begin(), path.end());
-                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_REGISTRY_ANOMALY, desc, ioc, 0);
+                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, desc, ioc, 0);
                 }
             }
             index++;
