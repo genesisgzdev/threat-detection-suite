@@ -1,15 +1,15 @@
-# Use a Windows base image with build tools
+# Threat Detection Suite - CI Build Environment (Windows Server Core 2022)
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
-# Install CMake and MSVC Build Tools (Conceptual - usually requires manual setup or Chocolatey)
-# For this task, we assume the environment has the necessary tools to build or we provide the Dockerfile structure.
+LABEL maintainer="security@genzt.dev"
+LABEL version="4.2.0"
 
 WORKDIR /app
 COPY . .
 
-# Build the userland service
-RUN cmake -B build -S .
+# Multi-stage userland build
+RUN cmake -B build -S . -G "Visual Studio 17 2022" -A x64
 RUN cmake --build build --config Release
 
-# Output binaries will be in /app/build/Release
-CMD ["ThreatDetectionService.exe"]
+# Note: Kernel driver build requires WDK which is typically not pre-installed in servercore
+CMD ["build/bin/Release/TDSService.exe"]

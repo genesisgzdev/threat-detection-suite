@@ -1,70 +1,124 @@
-#include <windows.h>
+#include "PersistenceDetector.h"
 #include <wbemidl.h>
 #include <taskschd.h>
 #include <comdef.h>
 #include <iostream>
+#include <wrl/client.h>
+#include <vector>
+#include "../../TDSScanner/Entropy.h"
+#include "../Logger.h"
 
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "taskschd.lib")
 
-class PersistenceDetector {
-public:
-    void ScanWmiSubscriptions() {
-        HRESULT hr;
-        IWbemLocator* pLoc = NULL;
-        IWbemServices* pSvc = NULL;
+namespace TDS {
 
-        hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
-        if (FAILED(hr)) return;
+using Microsoft::WRL::ComPtr;
 
-        hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\SUBSCRIPTION"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
-        if (FAILED(hr)) { pLoc->Release(); return; }
+void PersistenceDetector::ScanWmiSubscriptions() {
+    ComPtr<IWbemLocator> pLoc;
+    HRESULT hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
+    if (FAILED(hr)) return;
 
-        // Query for __EventFilter, __EventConsumer, and bindings
-        IEnumWbemClassObject* pEnumerator = NULL;
-        hr = pSvc->ExecQuery(bstr_t("WQL"), bstr_t("SELECT * FROM __EventFilter"), 
-                             WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
+    ComPtr<IWbemServices> pSvc;
+    hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\SUBSCRIPTION"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
+    if (FAILED(hr)) return;
 
-        if (SUCCEEDED(hr)) {
-            IWbemClassObject* pclsObj = NULL;
-            ULONG uReturn = 0;
-            while (pEnumerator) {
-                hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
-                if (0 == uReturn) break;
+    ComPtr<IEnumWbemClassObject> pEnumerator;
+    hr = pSvc->ExecQuery(bstr_t("WQL"), bstr_t("SELECT * FROM __EventFilter"), 
+                         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
 
-                VARIANT vtProp;
-                pclsObj->Get(L"Name", 0, &vtProp, 0, 0);
-                std::wcout << L"[*] Found WMI Event Filter: " << vtProp.bstrVal << std::endl;
-                VariantClear(&vtProp);
-                pclsObj->Release();
+    if (SUCCEEDED(hr)) {
+        IWbemClassObject* pclsObj = NULL;
+        ULONG uReturn = 0;
+        while (pEnumerator) {
+            hr = pEnumerator->Next(WAIT_OBJECT_0, 1, &pclsObj, &uReturn);
+            if (0 == uReturn) break;
+
+            VARIANT vtProp;
+            pclsObj->Get(L"Name", 0, &vtProp, 0, 0);
+            if (vtProp.vt == VT_BSTR) {
+                std::wstring name = vtProp.bstrVal;
+                std::string sName(name.begin(), name.end());
+                Logger::Instance().LogThreat(TDS_SEVERITY_MEDIUM, CAT_PERSISTENCE, "WMI Event Filter detected: " + sName, "WMI", 0);
             }
+            VariantClear(&vtProp);
+            pclsObj->Release();
         }
-
-        pSvc->Release();
-        pLoc->Release();
     }
+}
 
-    void ScanScheduledTasks() {
-        ITaskService* pService = NULL;
-        HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
-        if (FAILED(hr)) return;
+void PersistenceDetector::ScanScheduledTasks() {
+    ComPtr<ITaskService> pService;
+    HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
+    if (FAILED(hr)) return;
 
-        hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+    if (SUCCEEDED(hr)) {
+        ComPtr<ITaskFolder> pRootFolder;
+        hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
         if (SUCCEEDED(hr)) {
-            ITaskFolder* pRootFolder = NULL;
-            hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+            ComPtr<IRegisteredTaskCollection> pTaskCollection;
+            hr = pRootFolder->GetTasks(NULL, &pTaskCollection);
             if (SUCCEEDED(hr)) {
-                IRegisteredTaskCollection* pTaskCollection = NULL;
-                hr = pRootFolder->GetTasks(NULL, &pTaskCollection);
-                if (SUCCEEDED(hr)) {
-                    LONG numTasks = 0;
-                    pTaskCollection->get_Count(&numTasks);
-                    std::cout << "[*] Found " << numTasks << " scheduled tasks in root folder." << std::endl;
-                    pTaskCollection->Release();
+                LONG numTasks = 0;
+                pTaskCollection->get_Count(&numTasks);
+                for (LONG i = 1; i <= numTasks; i++) {
+                    ComPtr<IRegisteredTask> pTask;
+                    if (SUCCEEDED(pTaskCollection->get_Item(_variant_t(i), &pTask))) {
+                        BSTR taskName;
+                        pTask->get_Name(&taskName);
+                        // Process task actions for LOLBins...
+                        SysFreeString(taskName);
+                    }
                 }
-                pRootFolder->Release();
             }
         }
-        pService->Release();
     }
-};
+}
+
+void PersistenceDetector::ScanTempPersistence() {
+    WCHAR tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    ScanDirectory(tempPath);
+}
+
+void PersistenceDetector::ScanDirectory(const std::wstring& directory) {
+    std::wstring searchPath = directory + L"\\*.*";
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
+
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0)
+            continue;
+
+        std::wstring fullPath = directory + L"\\" + findData.cFileName;
+
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            ScanDirectory(fullPath);
+        } else {
+            ULONGLONG fileSize = (static_cast<ULONGLONG>(findData.nFileSizeHigh) << 32) | findData.nFileSizeLow;
+            
+            if (fileSize > 512) {
+                bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) != 0;
+                bool isSystem = (findData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) != 0;
+
+                if (isHidden && isSystem) {
+                    std::string fPath(fullPath.begin(), fullPath.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PERSISTENCE, "Hidden+System file detected in temp", fPath, 0);
+                }
+
+                if (Entropy::IsFileHighEntropy(fullPath)) {
+                    std::string fPath(fullPath.begin(), fullPath.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_PERSISTENCE, "High entropy persistence file detected", fPath, 0);
+                }
+            }
+        }
+    } while (FindNextFileW(hFind, &findData));
+
+    FindClose(hFind);
+}
+
+} // namespace TDS

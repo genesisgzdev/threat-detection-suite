@@ -1,40 +1,34 @@
-# CONTRIBUTING: Threat Detection Suite v4.0
+# CONTRIBUTING: Threat Detection Suite v4.2.0
 
-Welcome to the Threat Detection Suite project. Contributing to a kernel-level security tool requires rigorous engineering standards and a focus on system stability.
+Welcome to the Threat Detection Suite project. Contributing to a kernel-level security tool requires rigorous engineering standards and a primary focus on system stability.
 
 ## Engineering Standards
 
 ### 1. Programming Standards
-- **User-mode (Service/Engine):** Strict C++17. Use modern C++ features (RAII, smart pointers) and avoid raw pointers where possible.
-- **Kernel-mode (Driver):** Strict C11. Adhere to WDK (Windows Driver Kit) best practices.
-- **Code Style:** Follow the `.editorconfig` settings (Allman style, 4-space indentation).
-- **Naming Conventions:** Use PascalCase for classes/structs and camelCase for variables/functions.
+- **User-mode (Service/Engine):** Strict C++17. Leverage RAII, smart pointers, and `std::variant`/`std::optional` for safety. Avoid raw pointers.
+- **Kernel-mode (Driver):** Strict C11. Adhere to WDK (Windows Driver Kit) best practices. Use NonPagedPoolNx for memory safety.
+- **Naming Conventions:** PascalCase for Classes/Structs, camelCase for variables/functions, and `g_` prefix for global variables.
 
 ### 2. Kernel Programming Guidelines
-- **IRQL Management:** Always be aware of the IRQL (Interrupt Request Level). Do not call functions that require `PASSIVE_LEVEL` at `DISPATCH_LEVEL` or higher.
-- **Memory Management:** Use `ExAllocatePool2` (or `ExAllocatePoolWithTag` for older versions) with appropriate pool tags. Always free allocated memory in all exit paths.
-- **Error Handling:** Check all `NTSTATUS` return values. Use `NT_SUCCESS()` macro.
-- **Stability:** Kernel crashes (BSOD) are unacceptable. Thoroughly test all driver changes in a virtualized environment with a debugger attached.
+- **IRQL Management:** Never call functions that require `PASSIVE_LEVEL` at `DISPATCH_LEVEL`. Use spinlocks sparingly and only for very short durations.
+- **Memory Management:** Use `TDSAllocatePool` (wrapper for `ExAllocatePoolWithTag`) with tag `'SDTe'`. Rigorously verify all allocation results.
+- **Inverted Call Model:** Follow the established model for user-mode communication. Never use shared events; always use pending IRPs.
 
-### 3. Behavioral Correlation & ETW
-- When adding new detection logic to `TDSEngine`, ensure it is modular and well-documented.
-- ETW event consumers should be efficient to minimize system overhead.
+### 3. Driver Debugging Guide
+To contribute to driver development, you must set up a proper debugging environment:
+1.  **Target Machine:** Use a Windows 10/11 Virtual Machine (VMware/Hyper-V).
+2.  **Enable Debugging:** Run `bcdedit /debug on` and `bcdedit /dbgsettings net hostip:<IP> port:50000` on the VM.
+3.  **Host Machine:** Use WinDbg (Preview) on your development machine.
+4.  **Symbol Path:** Configure WinDbg to use Microsoft Symbol Server and your local build output folder.
+5.  **DbgPrint:** Use `DbgPrint` or `KdPrint` for logging. Monitor logs using `DbgView` (Run as Admin, check "Capture Kernel").
 
 ## Development Workflow
 
-1.  **Fork and Branch:** Create a feature branch from the `develop` branch.
-2.  **Implementation:** Implement your changes, following the standards above.
-3.  **Testing:**
-    - **Unit Tests:** Add unit tests for user-mode logic in the `tests/` directory.
-    - **Integration Tests:** Verify driver-service communication and end-to-end detection.
-4.  **Documentation:** Update the relevant documentation if you change or add functionality.
-5.  **Pull Request:** Submit a PR to the `develop` branch. PRs must pass all CI checks and require approval from at least two maintainers.
+1.  **Branching:** Create a feature branch from `main` (or `develop` if present).
+2.  **Reproduction:** For bug fixes, include a reproduction script or a new unit test case.
+3.  **Validation:**
+    - **Unit Tests:** Located in `tests/`. Use the provided CMake test runner.
+    - **Driver Validation:** Run with Static Driver Verifier (SDV) and Driver Verifier (verifier.exe) on the target machine.
+4.  **Pull Request:** Ensure your code passes all linting and build checks. Provide a detailed summary of architectural changes.
 
-## Code Reviews
-Code reviews are intensive. Expect feedback on:
-- Security implications.
-- Performance impact (especially in the kernel driver).
-- Adherence to architectural patterns.
-- Error handling and edge cases.
-
-By contributing, you agree that your contributions will be licensed under the project's [LICENSE](LICENSE).
+By contributing, you agree that your contributions will be licensed under the project's [MIT LICENSE](LICENSE).

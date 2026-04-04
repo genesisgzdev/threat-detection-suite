@@ -1,4 +1,4 @@
-# Threat Detection Suite v4.0 - Git Ignore
+# Threat Detection Suite v4.2.0 - Git Ignore
 
 # Build Directories
 bin/
@@ -8,6 +8,7 @@ out/
 x64/
 x86/
 ARM64/
+Generated Files/
 
 # Visual Studio / MSVC
 .vs/
@@ -30,6 +31,7 @@ ARM64/
 *.inf
 *.cat
 *.cer
+*.pfx
 *.pdb
 *.ilk
 *.exp
@@ -38,6 +40,7 @@ ARM64/
 _WDKContent.xml
 Package/
 Driver/
+*.lastcodeanalysissucceeded
 
 # CMake
 CMakeCache.txt
@@ -78,8 +81,10 @@ _CPack_Packages/
 *.old
 *.patch
 *.diff
+tds_correlator.db
 
-# Python / Tools
+# Scripting & Tools
+rebrand.ps1
 __pycache__/
 *.py[cod]
 *$py.class

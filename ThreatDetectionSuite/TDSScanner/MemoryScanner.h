@@ -1,32 +1,21 @@
 #pragma once
-
-#include "../TDSCommon/TDSCommon.h"
+#include <windows.h>
 #include <vector>
 #include <string>
-#include <winternl.h>
+#include <unordered_set>
+#include "../TDSCommon/TDSCommon.h"
 
 namespace TDS {
 
 class MemoryScanner {
 public:
-    MemoryScanner() = default;
-    ~MemoryScanner() = default;
-
-    // Detects inline API hooks in ntdll.dll and kernel32.dll
-    bool DetectApiHooks(DWORD processId);
-
-    // Scans RWX memory regions for NOP sleds (8+ consecutive 0x90)
-    bool DetectNopSleds(DWORD processId);
-
-    // Detects process hollowing by comparing PE headers
-    bool DetectProcessHollowing(DWORD processId);
+    static bool DetectNopSleds(HANDLE hProcess, LPVOID startAddress, SIZE_T regionSize);
+    static void ScanProcessHooks(HANDLE hProcess);
+    static void ScanAllProcesses();
 
 private:
-    bool CheckModuleHooks(HANDLE hProcess, const std::wstring& moduleName);
-    bool IsNtApi(const std::string& functionName);
-    
-    // Helper to read process memory
-    bool ReadProcessMemorySafe(HANDLE hProcess, LPCVOID lpBaseAddress, LPVOID lpBuffer, SIZE_T nSize);
+    static void AnalyzeProcessMemory(DWORD pid, const std::wstring& processName);
+    static bool IsJitEnabledProcess(const std::wstring& processName);
 };
 
 } // namespace TDS

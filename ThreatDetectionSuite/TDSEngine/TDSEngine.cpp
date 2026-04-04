@@ -1,233 +1,212 @@
 #include "TDSEngine.h"
-#include <windows.h>
-#include <shlobj.h>
-#include <wbemidl.h>
-#include <comdef.h>
-#include <numeric>
-#include <cmath>
+#include <iostream>
+#include <chrono>
+#include <tlhelp32.h>
+#include <psapi.h>
 #include <algorithm>
-
-#pragma comment(lib, "wbemuuid.lib")
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "oleaut32.lib")
+#include <winternl.h>
+#include "Logger.h"
 
 namespace TDS {
 
+typedef NTSTATUS(NTAPI* pNtQueryInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+
 TDSEngine::TDSEngine() {
-    InitializeLolbasList();
-}
-
-void TDSEngine::InitializeLolbasList() {
-    // Adding >150 LOLBAS binaries
-    const std::vector<std::wstring> lolbas = {
-        L"mshta.exe", L"regsvr32.exe", L"rundll32.exe", L"certutil.exe", L"bitsadmin.exe",
-        L"powershell.exe", L"pwsh.exe", L"cmd.exe", L"wscript.exe", L"cscript.exe",
-        L"installutil.exe", L"msbuild.exe", L"csc.exe", L"vbc.exe", L"regasm.exe",
-        L"regsvcs.exe", L"control.exe", L"cmstp.exe", L"dfsvc.exe", L"mavinject.exe",
-        L"extrac32.exe", L"findstr.exe", L"makecab.exe", L"expand.exe", L"forfiles.exe",
-        L"hh.exe", L"ieadvpack.dll", L"infdefaultinstall.exe", L"pcalua.exe", L"pcwrun.exe",
-        L"presentationhost.exe", L"print.exe", L"replace.exe", L"scriptrunner.exe", L"shdocvw.dll",
-        L"sysocmgr.exe", L"url.dll", L"verclsid.exe", L"wab.exe", L"winhlp32.exe",
-        L"zipfldr.dll", L"at.exe", L"atbroker.exe", L"bash.exe", L"bginfo.exe",
-        L"advpack.dll", L"appvlp.exe", L"bash.exe", L"cl_invocation.ps1", L"cl_nativecommand.ps1",
-        L"collect.exe", L"crashutil.exe", L"desktopimgdownldr.exe", L" diantz.exe", L"dnscmd.exe",
-        L" Esentutl.exe", L"eventvwr.exe", L"fltmc.exe", L"ftp.exe", L"gfxdownloadwrapper.exe",
-        L"gpscript.exe", L" hrun.exe", L"ieexec.exe", L"ilasm.exe", L" jsc.exe",
-        L"mftrace.exe", L"microsoft.workflow.compiler.exe", L" mpcmdrun.exe", L"odbcconf.exe", L" tracker.exe",
-        L" squirrel.exe", L" te.exe", L" winget.exe", L" wmic.exe", L" xwizard.exe",
-        // Adding more to reach > 150
-        L"adplus.exe", L"agentexecutor.exe", L"appverif.exe", L"aspnet_compiler.exe", L"dxcap.exe",
-        L"excel.exe", L"mscoree.dll", L"msiexec.exe", L"powerpnt.exe", L"vsls-agent.exe",
-        L"winword.exe", L"wsmanhttpconfig.exe", L"addinutil.exe", L"advpack.dll", L"appvlp.exe",
-        L"bash.exe", L"bginfo.exe", L"bitsadmin.exe", L"certutil.exe", L"cl_invocation.ps1",
-        L"cl_nativecommand.ps1", L"collect.exe", L"comsvcs.dll", L"control.exe", L"csc.exe",
-        L"cscript.exe", L"desktopimgdownldr.exe", L"dfsvc.exe", L"diantz.exe", L"diskshadow.exe",
-        L"dnscmd.exe", L"dotnet.exe", L"dxcap.exe", L"esentutl.exe", L"expand.exe",
-        L"extrac32.exe", L"findstr.exe", L"forfiles.exe", L"ftp.exe", L"gfxdownloadwrapper.exe",
-        L"gpscript.exe", L"hh.exe", L"ieadvpack.dll", L"ieexec.exe", L"ilasm.exe",
-        L"infdefaultinstall.exe", L"installutil.exe", L"jsc.exe", L"makecab.exe", L"mavinject.exe",
-        L"mftrace.exe", L"microsoft.workflow.compiler.exe", L"mpcmdrun.exe", L"msbuild.exe", L"msconfig.exe",
-        L"msdt.exe", L"mshta.exe", L"msiexec.exe", L"netsh.exe", L"odbcconf.exe",
-        L"pcalua.exe", L"pcwrun.exe", L"pkthelp.exe", L"pnputil.exe", L"presentationhost.exe",
-        L"print.exe", L"rcsi.exe", L"reg.exe", L"regasm.exe", L"regedit.exe",
-        L"regini.exe", L"register-cimprovider.exe", L"regsvr32.exe", L"regsvcs.exe", L"replace.exe",
-        L"rpcping.exe", L"rundll32.exe", L"runonce.exe", L"sc.exe", L"schtasks.exe",
-        L"scriptrunner.exe", L"shdocvw.dll", L"sqldumper.exe", L"sqlps.exe", L"sqltoolsps.exe",
-        L"squirrel.exe", L"sysocmgr.exe", L"system.management.automation.dll", L"te.exe", L"tracker.exe",
-        L"url.dll", L"verclsid.exe", L"wab.exe", L"winget.exe", L"winhlp32.exe",
-        L"wmic.exe", L"workfolders.exe", L"wscript.exe", L"wsmanhttpconfig.exe", L"xwizard.exe"
+    m_lolbasBinaries = {
+        L"certutil.exe", L"powershell.exe", L"mshta.exe", L"regsvr32.exe", 
+        L"rundll32.exe", L"msiexec.exe", L"csc.exe", L"bitsadmin.exe",
+        L"wmic.exe", L"schtasks.exe", L"at.exe", L"sc.exe"
     };
+    
+    m_eventBus = std::make_unique<EventBus>();
+    m_contextManager = std::make_unique<ProcessContextManager>();
+    m_correlator = std::make_unique<SequenceCorrelator>();
+}
 
-    for (const auto& b : lolbas) {
-        m_lolbasBinaries.insert(b);
+TDSEngine::~TDSEngine() {
+    Shutdown();
+}
+
+void TDSEngine::Start() {
+    if (m_running) return;
+    m_running = true;
+    m_analysisThread = std::thread(&TDSEngine::AnalysisLoop, this);
+}
+
+void TDSEngine::Shutdown() {
+    m_running = false;
+    if (m_analysisThread.joinable()) {
+        m_analysisThread.join();
     }
 }
 
-bool TDSEngine::IsLolbasBinary(const std::wstring& imagePath) {
-    size_t lastSlash = imagePath.find_last_of(L"\\/");
-    std::wstring fileName = (lastSlash == std::wstring::npos) ? imagePath : imagePath.substr(lastSlash + 1);
-    
-    // Convert to lower case for comparison if not already handled by set (standardizing on case-insensitive)
-    // Actually, I'll just use a loop with _wcsicmp or transform the set to lower.
-    for (const auto& b : m_lolbasBinaries) {
-        if (_wcsicmp(fileName.c_str(), b.c_str()) == 0) {
-            return true;
+void TDSEngine::PushEvent(const Event& event) {
+    m_eventBus->Push(event);
+}
+
+void TDSEngine::AnalysisLoop() {
+    while (m_running) {
+        auto eventOpt = m_eventBus->WaitAndPop(500);
+        if (eventOpt) {
+            EvaluateThreat(*eventOpt);
+            m_contextManager->HandleEvent(*eventOpt);
+            m_correlator->HandleEvent(eventOpt->Pid, eventOpt->Type);
         }
     }
-    return false;
 }
 
-void TDSEngine::ScanPersistenceLocations() {
-    WCHAR path[MAX_PATH];
-    const std::vector<int> folders = { CSIDL_APPDATA, CSIDL_COMMON_APPDATA, CSIDL_LOCAL_APPDATA };
+void TDSEngine::EvaluateThreat(const Event& event) {
+    auto context = m_contextManager->GetContext(event.Pid);
     
-    for (int folder : folders) {
-        if (SUCCEEDED(SHGetFolderPathW(NULL, folder, NULL, 0, path))) {
-            // In a real implementation, we would recursively scan these directories.
-            // For now, we'll just demonstrate the check on the root of these folders.
-        }
-    }
-    
-    // C:\Windows\Temp
-    // Scan it too.
-}
-
-bool TDSEngine::DetectAdsInFile(const std::wstring& filePath) {
-    WIN32_FIND_STREAM_DATA streamData;
-    HANDLE hFind = FindFirstStreamW(filePath.c_str(), FindStreamInfoStandard, &streamData, 0);
-    if (hFind == INVALID_HANDLE_VALUE) return false;
-
-    bool foundExecutableStream = false;
-    do {
-        // streamData.cStreamName is like ":streamname:$DATA"
-        if (wcslen(streamData.cStreamName) > 7) { // More than just ::$DATA
-            // Check if it's an executable stream (simplified check)
-            if (wcsstr(streamData.cStreamName, L".exe") || wcsstr(streamData.cStreamName, L".dll")) {
-                foundExecutableStream = true;
-                break;
+    switch (event.Type) {
+        case TDSEventProcessCreate: {
+            auto data = std::get<ProcessEvent>(event.Data);
+            if (IsLolbasBinary(data.ImagePath)) {
+                int score = CalculateLOLBinRiskScore(data.CommandLine);
+                if (score >= 85) {
+                    std::string cmd(data.CommandLine.begin(), data.CommandLine.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin abuse detected", cmd, event.Pid);
+                    m_contextManager->UpdateScore(event.Pid, score);
+                } else if (score >= 50) {
+                    std::string cmd(data.CommandLine.begin(), data.CommandLine.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "Suspicious LOLBin execution", cmd, event.Pid);
+                    m_contextManager->UpdateScore(event.Pid, score);
+                }
             }
+            break;
         }
-    } while (FindNextStreamW(hFind, &streamData));
-
-    FindClose(hFind);
-    return foundExecutableStream;
-}
-
-bool TDSEngine::CheckWmiPersistence() {
-    HRESULT hr;
-    hr = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hr)) return false;
-
-    hr = CoInitializeSecurity(NULL, -1, NULL, NULL, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE, NULL);
-    if (FAILED(hr)) { CoUninitialize(); return false; }
-
-    IWbemLocator* pLoc = NULL;
-    hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
-    if (FAILED(hr)) { CoUninitialize(); return false; }
-
-    IWbemServices* pSvc = NULL;
-    hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\SUBSCRIPTION"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
-    if (FAILED(hr)) { pLoc->Release(); CoUninitialize(); return false; }
-
-    IEnumWbemClassObject* pEnumerator = NULL;
-    hr = pSvc->ExecQuery(bstr_t("WQL"), bstr_t("SELECT * FROM CommandLineEventConsumer"), WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
-    
-    bool found = false;
-    if (SUCCEEDED(hr)) {
-        IWbemClassObject* pclsObj = NULL;
-        ULONG uReturn = 0;
-        while (pEnumerator) {
-            hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
-            if (0 == uReturn) break;
-            
-            VARIANT vtProp;
-            hr = pclsObj->Get(L"CommandLineTemplate", 0, &vtProp, 0, 0);
-            if (SUCCEEDED(hr) && vtProp.vt == VT_BSTR) {
-                // Analyze command line
-                found = true; 
+        case TDSEventRemoteThread: {
+            auto data = std::get<RemoteThreadEvent>(event.Data);
+            Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Remote thread injection detected", "Target PID: " + std::to_string(data.TargetPid), event.Pid);
+            m_contextManager->UpdateScore(data.TargetPid, 50);
+            break;
+        }
+        case TDSEventHandleOp: {
+            auto data = std::get<HandleOpEvent>(event.Data);
+            if (data.DesiredAccess & PROCESS_VM_READ) {
+                Logger::Instance().LogThreat(TDS_SEVERITY_MEDIUM, CAT_CREDENTIAL_THEFT, "Suspicious handle to sensitive process", "Target PID: " + std::to_string(data.TargetPid), event.Pid);
+                m_contextManager->UpdateScore(event.Pid, 15);
             }
-            VariantClear(&vtProp);
-            pclsObj->Release();
-        }
-    }
-
-    pEnumerator->Release();
-    pSvc->Release();
-    pLoc->Release();
-    CoUninitialize();
-    return found;
-}
-
-bool TDSEngine::AnalyzeRegistryValue(const std::wstring& keyPath, const std::wstring& valueName, const std::wstring& data) {
-    if (CaseInsensitiveContains(data, L"cmd.exe /c") || 
-        CaseInsensitiveContains(data, L"powershell") ||
-        CaseInsensitiveContains(data, L"-enc") ||
-        CaseInsensitiveContains(data, L"%TEMP%")) {
-        return true;
-    }
-    return false;
-}
-
-void TDSEngine::RecordNetworkConnection(DWORD processId, const std::wstring& remoteIp, uint16_t remotePort) {
-    auto now = std::chrono::steady_clock::now();
-    auto& processHistory = m_networkHistory[processId];
-    
-    bool found = false;
-    for (auto& conn : processHistory) {
-        if (conn.remoteIp == remoteIp && conn.remotePort == remotePort) {
-            conn.timestamps.push_back(now);
-            found = true;
             break;
         }
     }
-    
-    if (!found) {
-        NetworkConnection conn;
-        conn.processId = processId;
-        conn.remoteIp = remoteIp;
-        conn.remotePort = remotePort;
-        conn.timestamps.push_back(now);
-        processHistory.push_back(conn);
-    }
 }
 
-bool TDSEngine::DetectBeaconing(DWORD processId) {
-    if (m_networkHistory.find(processId) == m_networkHistory.end()) return false;
-    
-    for (const auto& conn : m_networkHistory[processId]) {
-        if (conn.timestamps.size() < 10) continue; // Need enough samples
-        
-        std::vector<double> intervals;
-        for (size_t i = 1; i < conn.timestamps.size(); ++i) {
-            auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(conn.timestamps[i] - conn.timestamps[i-1]).count();
-            intervals.push_back(static_cast<double>(diff));
-        }
-        
-        double sum = std::accumulate(intervals.begin(), intervals.end(), 0.0);
-        double mean = sum / intervals.size();
-        
-        double sq_sum = std::inner_product(intervals.begin(), intervals.end(), intervals.begin(), 0.0);
-        double stdev = std::sqrt(sq_sum / intervals.size() - mean * mean);
-        
-        // Low relative standard deviation indicates beaconing
-        if (mean > 0 && (stdev / mean) < 0.15) {
-            return true;
-        }
-    }
-    
-    return false;
+bool TDSEngine::IsLolbasBinary(const std::wstring& path) {
+    size_t lastSlash = path.find_last_of(L"\\");
+    std::wstring filename = (lastSlash == std::wstring::npos) ? path : path.substr(lastSlash + 1);
+    std::wstring lower = filename;
+    for (auto& c : lower) c = towlower(c);
+    return m_lolbasBinaries.find(lower) != m_lolbasBinaries.end();
 }
 
-bool TDSEngine::CaseInsensitiveContains(const std::wstring& haystack, const std::wstring& needle) {
-    auto it = std::search(
-        haystack.begin(), haystack.end(),
-        needle.begin(), needle.end(),
-        [](wchar_t ch1, wchar_t ch2) {
-            return towlower(ch1) == towlower(ch2);
-        }
-    );
-    return it != haystack.end();
+std::wstring TDSEngine::GetProcessCommandLine(DWORD pid) {
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!hProcess) return L"";
+
+    static pNtQueryInformationProcess NtQueryInfo = (pNtQueryInformationProcess)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
+    if (!NtQueryInfo) { CloseHandle(hProcess); return L""; }
+
+    PROCESS_BASIC_INFORMATION pbi;
+    if (!NT_SUCCESS(NtQueryInfo(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL))) { CloseHandle(hProcess); return L""; }
+
+    PEB peb;
+    if (!ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) { CloseHandle(hProcess); return L""; }
+
+    RTL_USER_PROCESS_PARAMETERS params;
+    if (!ReadProcessMemory(hProcess, peb.ProcessParameters, &params, sizeof(params), NULL)) { CloseHandle(hProcess); return L""; }
+
+    std::vector<wchar_t> buffer(params.CommandLine.Length / sizeof(wchar_t) + 1, 0);
+    if (!ReadProcessMemory(hProcess, params.CommandLine.Buffer, buffer.data(), params.CommandLine.Length, NULL)) { CloseHandle(hProcess); return L""; }
+
+    CloseHandle(hProcess);
+    return std::wstring(buffer.data());
+}
+
+int TDSEngine::CalculateLOLBinRiskScore(const std::wstring& commandLine) {
+    int score = 0;
+    std::wstring lower = commandLine;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+
+    if (lower.find(L"-encodedcommand") != std::wstring::npos) score += 30;
+    else if (lower.find(L"-encode") != std::wstring::npos || lower.find(L"-enc ") != std::wstring::npos) score += 25;
+
+    if (lower.find(L"iex") != std::wstring::npos || lower.find(L"invoke-expression") != std::wstring::npos) score += 40;
+    if (lower.find(L"downloadstring") != std::wstring::npos || lower.find(L"downloadfile") != std::wstring::npos) score += 40;
+    if (lower.find(L"http") != std::wstring::npos) score += 15;
+
+    if (lower.find(L"regsvr32") != std::wstring::npos && lower.find(L"/i:http") != std::wstring::npos) score += 85;
+
+    if (lower.find(L"-noprofile") != std::wstring::npos) score += 10;
+    if (lower.find(L"hidden") != std::wstring::npos) score += 20;
+
+    return min(score, 100);
+}
+
+void TDSEngine::ScanLOLBins() {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return;
+
+    PROCESSENTRY32W pe32;
+    pe32.dwSize = sizeof(PROCESSENTRY32W);
+
+    if (Process32FirstW(hSnapshot, &pe32)) {
+        do {
+            std::wstring exeName = pe32.szExeFile;
+            std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
+            
+            if (exeName == L"certutil.exe" || exeName == L"powershell.exe" || exeName == L"wmic.exe" || exeName == L"regsvr32.exe") {
+                std::wstring cmdLine = GetProcessCommandLine(pe32.th32ProcessID);
+                int score = CalculateLOLBinRiskScore(cmdLine);
+                if (score >= 85) {
+                    std::string sExe(exeName.begin(), exeName.end());
+                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin threat found in snapshot", sExe, pe32.th32ProcessID);
+                }
+            }
+        } while (Process32NextW(hSnapshot, &pe32));
+    }
+    CloseHandle(hSnapshot);
+}
+
+void TDSEngine::ScanProcessBehaviors() {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return;
+
+    PROCESSENTRY32W pe32;
+    pe32.dwSize = sizeof(PROCESSENTRY32W);
+
+    if (Process32FirstW(hSnapshot, &pe32)) {
+        do {
+            std::wstring exeName = pe32.szExeFile;
+            std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
+
+            if (exeName.find(L"svchost") != std::wstring::npos || exeName.find(L"audio") != std::wstring::npos) {
+                HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pe32.th32ProcessID);
+                if (hProc) {
+                    DWORD needed = 0;
+                    EnumProcessModules(hProc, NULL, 0, &needed);
+                    int dll_count = needed / sizeof(HMODULE);
+
+                    int threshold = (exeName.find(L"svchost") != std::wstring::npos) ? 150 : 80;
+                    if (dll_count > threshold) {
+                        std::string sExe(exeName.begin(), exeName.end());
+                        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Abnormally high DLL count in core process", sExe, pe32.th32ProcessID);
+                    }
+                    CloseHandle(hProc);
+                }
+            }
+        } while (Process32NextW(hSnapshot, &pe32));
+    }
+    CloseHandle(hSnapshot);
+}
+
+void TDSEngine::UpdateNetworkStats(DWORD pid, double latency) {
+    std::lock_guard<std::mutex> lock(m_engineMutex);
+    m_networkMetrics[pid].Push(latency);
+    if (m_networkMetrics[pid].Variance() < 0.05 && m_networkMetrics[pid].m_n > 5) {
+        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_C2_COMMUNICATION, "Network beaconing patterns detected", "Low Variance", pid);
+        m_contextManager->UpdateScore(pid, 30);
+    }
 }
 
 } // namespace TDS
