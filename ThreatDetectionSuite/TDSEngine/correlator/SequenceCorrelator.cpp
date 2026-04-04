@@ -1,52 +1,79 @@
-#include <windows.h>
-#include <map>
-#include <vector>
-#include <string>
-#include <time.h>
+#include "SequenceCorrelator.h"
 #include <iostream>
+#include <fstream>
+#include "../Logger.h"
 
-struct EventInfo {
-    int Type;
-    time_t Timestamp;
-    std::wstring Detail;
-};
+namespace TDS {
 
-class SequenceCorrelator {
-    std::map<DWORD, std::vector<EventInfo>> processEvents;
-    const int TIME_WINDOW = 30; // 30 seconds window
+SequenceCorrelator::SequenceCorrelator() {
+    LoadFromDisk();
+}
 
-public:
-    void AddEvent(DWORD pid, int type, const std::wstring& detail) {
-        time_t now = time(NULL);
-        processEvents[pid].push_back({type, now, detail});
-        
-        CheckSequences(pid);
-        CleanupWindow(pid, now);
+SequenceCorrelator::~SequenceCorrelator() {
+    SaveToDisk();
+}
+
+void SequenceCorrelator::HandleEvent(uint32_t pid, TDS_EVENT_TYPE type) {
+    if (type == TDSEventProcessTerminate) {
+        processEvents.erase(pid);
+        return;
     }
 
-private:
-    void CheckSequences(DWORD pid) {
-        auto& events = processEvents[pid];
-        bool hasSuspiciousProcess = false;
-        bool hasMemoryOp = false;
-        bool hasDgaQuery = false;
+    auto& events = processEvents[pid];
+    events.push_back({type, GetTickCount64()});
 
+    if (events.size() > 10) events.pop_front();
+
+    // Pattern matching for multi-stage attacks using formal enum types
+    bool hasCreate = false, hasNet = false;
+    for (const auto& ev : events) {
+        if (ev.Type == TDSEventProcessCreate) hasCreate = true;
+        if (ev.Type == TDSEventNetworkConnect && hasCreate) hasNet = true;
+        if (ev.Type == TDSEventRegistryOp && hasNet) {
+            Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PROCESS_BEHAVIOR, 
+                "High-confidence attack sequence: Execution -> Network -> Persistence", "Correlation", pid);
+        }
+    }
+}
+
+void SequenceCorrelator::SaveToDisk() {
+    std::ofstream ofs(m_persistenceFile, std::ios::binary | std::ios::trunc);
+    if (!ofs) return;
+
+    size_t mapSize = processEvents.size();
+    ofs.write(reinterpret_cast<const char*>(&mapSize), sizeof(mapSize));
+
+    for (const auto& [pid, events] : processEvents) {
+        ofs.write(reinterpret_cast<const char*>(&pid), sizeof(pid));
+        size_t dequeSize = events.size();
+        ofs.write(reinterpret_cast<const char*>(&dequeSize), sizeof(dequeSize));
         for (const auto& ev : events) {
-            // 1: ProcessCreate, 2: MemoryOp (ETW), 3: DNS query (ETW)
-            if (ev.Type == 1 && ev.Detail.find(L"powershell.exe") != std::wstring::npos) hasSuspiciousProcess = true;
-            if (ev.Type == 2) hasMemoryOp = true;
-            if (ev.Type == 3 && ev.Detail.length() > 20) hasDgaQuery = true; // Simple entropy heuristic
-        }
-
-        if (hasSuspiciousProcess && hasMemoryOp && hasDgaQuery) {
-            std::wcout << L"[!!!] CRITICAL: Ransomware/Dropper sequence detected in PID: " << pid << std::endl;
+            ofs.write(reinterpret_cast<const char*>(&ev), sizeof(ev));
         }
     }
+}
 
-    void CleanupWindow(DWORD pid, time_t now) {
-        auto& events = processEvents[pid];
-        events.erase(std::remove_if(events.begin(), events.end(), [&](const EventInfo& e) {
-            return (now - e.Timestamp) > TIME_WINDOW;
-        }), events.end());
+void SequenceCorrelator::LoadFromDisk() {
+    std::ifstream ifs(m_persistenceFile, std::ios::binary);
+    if (!ifs) return;
+
+    size_t mapSize = 0;
+    if (!ifs.read(reinterpret_cast<char*>(&mapSize), sizeof(mapSize))) return;
+
+    for (size_t i = 0; i < mapSize; i++) {
+        uint32_t pid = 0;
+        size_t dequeSize = 0;
+        if (!ifs.read(reinterpret_cast<char*>(&pid), sizeof(pid))) break;
+        if (!ifs.read(reinterpret_cast<char*>(&dequeSize), sizeof(dequeSize))) break;
+        
+        std::deque<EventInfo> events;
+        for (size_t j = 0; j < dequeSize; j++) {
+            EventInfo ev;
+            if (!ifs.read(reinterpret_cast<char*>(&ev), sizeof(ev))) break;
+            events.push_back(ev);
+        }
+        processEvents[pid] = std::move(events);
     }
-};
+}
+
+} // namespace TDS

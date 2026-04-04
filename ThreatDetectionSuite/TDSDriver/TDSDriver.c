@@ -35,11 +35,14 @@ UINT64 g_FilterIdDgV4 = 0;
 UINT64 g_FilterIdDgV6 = 0;
 
 // FIX: Unique GUID for WFP Callout (Issue 9)
-// {B2A1C3D4-E5F6-4A7B-8C9D-E0F1A2B3C4D5}
-DEFINE_GUID(TDS_WFP_CALLOUT_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd5);
-DEFINE_GUID(TDS_WFP_CALLOUT_V6_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd6);
-DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V4_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd7);
-DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V6_GUID, 0xb2a1c3d4, 0xe5f6, 0x4a7b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd8);
+// {6447814A-5813-40E9-974A-4B95D0337C71}
+DEFINE_GUID(TDS_WFP_CALLOUT_GUID, 0x6447814a, 0x5813, 0x40e9, 0x97, 0x4a, 0x4b, 0x95, 0xd0, 0x33, 0x7c, 0x71);
+// {A4341934-8B63-4702-861C-84725345712C}
+DEFINE_GUID(TDS_WFP_CALLOUT_V6_GUID, 0xa4341934, 0x8b63, 0x4702, 0x86, 0x1c, 0x84, 0x72, 0x53, 0x45, 0x71, 0x2c);
+// {F692070E-1144-469A-9E23-7A91104E144A}
+DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V4_GUID, 0xf692070e, 0x1144, 0x469a, 0x9e, 0x23, 0x7a, 0x91, 0x10, 0x4e, 0x14, 0x4a);
+// {C54E2401-447A-4416-8D6E-821F440A762D}
+DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V6_GUID, 0xc54e2401, 0x447a, 0x4416, 0x8d, 0x6e, 0x82, 0x1f, 0x44, 0x0a, 0x76, 0x2d);
 
 typedef struct _TDS_PENDING_IRP {
     LIST_ENTRY ListEntry;
@@ -422,6 +425,10 @@ FLT_POSTOP_CALLBACK_STATUS TDSPostCreateCallback(
     _In_opt_ PVOID CompletionContext,
     _In_ FLT_POST_OPERATION_FLAGS Flags
 ) {
+    if (Flags & FLTFL_POST_OPERATION_DRAINING) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
     UNREFERENCED_PARAMETER(FltObjects);
     UNREFERENCED_PARAMETER(CompletionContext);
     UNREFERENCED_PARAMETER(Flags);
@@ -550,8 +557,28 @@ NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument
     REG_NOTIFY_CLASS notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)Argument1;
     
     if (notifyClass == RegNtPreSetValueKey) {
-        ULONG dataSize = 0;
-        ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER);
+        PREG_SET_VALUE_KEY_INFORMATION info = (PREG_SET_VALUE_KEY_INFORMATION)Argument2;
+        
+        UNICODE_STRING keyPath = { 0 };
+        ULONG size = 0;
+        ObQueryNameString(info->Object, NULL, 0, &size);
+        POBJECT_NAME_INFORMATION nameInfo = NULL;
+        if (size > 0) {
+            nameInfo = (POBJECT_NAME_INFORMATION)ExAllocatePoolWithTag(NonPagedPoolNx, size, 'SDTe');
+            if (nameInfo) {
+                if (NT_SUCCESS(ObQueryNameString(info->Object, nameInfo, size, &size))) {
+                    keyPath = nameInfo->Name;
+                }
+            }
+        }
+
+        ULONG valueNameLen = (info->ValueName) ? info->ValueName->Length : 0;
+        ULONG dataBufSize = (info->DataSize > 128) ? 128 : info->DataSize;
+        if (info->Data == NULL) dataBufSize = 0;
+        
+        ULONG dataSize = sizeof(TDS_REGISTRY_EVENT_DATA) + keyPath.Length + valueNameLen + dataBufSize;
+        ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+        
         PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, totalSize, 'SDTe');
         if (item) {
             RtlZeroMemory(item, totalSize);
@@ -564,8 +591,30 @@ NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument
             header->DataSize = dataSize;
             KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
 
+            PTDS_REGISTRY_EVENT_DATA regData = (PTDS_REGISTRY_EVENT_DATA)(header + 1);
+            regData->Type = info->Type;
+            regData->DataSize = info->DataSize;
+            
+            PUCHAR buffer = (PUCHAR)(regData + 1);
+            if (keyPath.Length > 0) {
+                regData->KeyPathOffset = (ULONG)(buffer - (PUCHAR)header);
+                RtlCopyMemory(buffer, keyPath.Buffer, keyPath.Length);
+                buffer += keyPath.Length;
+            }
+            if (valueNameLen > 0) {
+                regData->ValueNameOffset = (ULONG)(buffer - (PUCHAR)header);
+                RtlCopyMemory(buffer, info->ValueName->Buffer, valueNameLen);
+                buffer += valueNameLen;
+            }
+            if (dataBufSize > 0) {
+                regData->DataOffset = (ULONG)(buffer - (PUCHAR)header);
+                RtlCopyMemory(buffer, info->Data, dataBufSize);
+            }
+
             QueueTDSEvent(item);
         }
+
+        if (nameInfo) ExFreePoolWithTag(nameInfo, 'SDTe');
     }
     return STATUS_SUCCESS;
 }
@@ -573,8 +622,10 @@ NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument
 void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
     if (!Create) return;
     
-    ULONG dataSize = 0;
-    ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER);
+    BOOLEAN isRemote = (ProcessId != PsGetCurrentProcessId());
+    ULONG dataSize = isRemote ? sizeof(TDS_REMOTE_THREAD_DATA) : 0;
+    ULONG totalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+    
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, totalSize, 'SDTe');
     if (!item) return;
 
@@ -582,11 +633,19 @@ void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
     item->TotalSize = totalSize;
 
     PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
-    header->Type = TDSEventThreadCreate;
-    header->ProcessId = HandleToUlong(ProcessId);
     header->ThreadId = HandleToUlong(ThreadId);
     header->DataSize = dataSize;
     KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
+
+    if (isRemote) {
+        header->Type = TDSEventRemoteThread;
+        header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); // Creator PID
+        PTDS_REMOTE_THREAD_DATA rData = (PTDS_REMOTE_THREAD_DATA)(header + 1);
+        rData->TargetProcessId = HandleToUlong(ProcessId);
+    } else {
+        header->Type = TDSEventThreadCreate;
+        header->ProcessId = HandleToUlong(ProcessId);
+    }
 
     QueueTDSEvent(item);
 }

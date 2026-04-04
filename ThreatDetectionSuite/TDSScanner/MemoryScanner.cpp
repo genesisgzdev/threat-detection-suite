@@ -145,8 +145,18 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
     }
 
     ScanProcessHooks(hProcess);
-    DetectProcessHollowing(hProcess, processName);
+
+    wchar_t fullPath[MAX_PATH];
+    DWORD size = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProcess, 0, fullPath, &size)) {
+        DetectProcessHollowing(hProcess, fullPath);
+    } else {
+        DetectProcessHollowing(hProcess, processName);
+    }
+
     CloseHandle(hProcess);
+}
+
 void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& processName) {
     // FIX: Professional Process Hollowing Detection (Issue 10)
     // 1. Get ImageBaseAddress from PEB

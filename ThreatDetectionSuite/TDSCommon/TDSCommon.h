@@ -11,6 +11,15 @@
 #include <stdint.h>
 #endif
 
+#ifndef _KERNEL_MODE
+#include <atomic>
+struct TDS_USER_METRICS {
+    std::atomic<uint64_t> TotalEventsProcessed{0};
+    std::atomic<uint64_t> ThreatsMitigated{0};
+    std::atomic<uint64_t> DriverEventsDropped{0};
+};
+#endif
+
 #pragma pack(push, 1)
 
 #define TDS_DEVICE_TYPE 0x8000
@@ -147,6 +156,14 @@ typedef struct _TDS_REMEDIATION_RESULT {
     char StatusMessage[256];
 } TDS_REMEDIATION_RESULT, *PTDS_REMEDIATION_RESULT;
 
+typedef struct _TDS_REGISTRY_EVENT_DATA {
+    uint32_t Type;
+    uint32_t KeyPathOffset;
+    uint32_t ValueNameOffset;
+    uint32_t DataOffset;
+    uint32_t DataSize;
+} TDS_REGISTRY_EVENT_DATA, *PTDS_REGISTRY_EVENT_DATA;
+
 #pragma pack(pop)
 
 #ifndef _KERNEL_MODE
@@ -170,15 +187,6 @@ inline const char* GetTDSSeverityName(TDS_THREAT_SEVERITY severity) {
     if (severity >= TDS_SEVERITY_MEDIUM)   return "MEDIUM";
     return "INFO";
 }
-#endif
-
-#ifndef _KERNEL_MODE
-#include <atomic>
-struct TDS_USER_METRICS {
-    std::atomic<uint64_t> TotalEventsProcessed{0};
-    std::atomic<uint64_t> ThreatsMitigated{0};
-    std::atomic<uint64_t> DriverEventsDropped{0};
-};
 #endif
 
 #define MAX_EVENT_BUFFER_SIZE 4096
