@@ -12,17 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Snyk
-        uses: snyk/actions/setup@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk Auth
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
 
       - name: Snyk Code Test
         run: |
           snyk code test --sarif-file-output=snyk.sarif || true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
+      
       - name: Upload Snyk report to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         with:
