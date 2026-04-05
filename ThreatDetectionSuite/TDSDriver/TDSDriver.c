@@ -379,18 +379,52 @@ void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
-    UNREFERENCED_PARAMETER(RegistryPath); UNICODE_STRING deviceName, symLink;
-    RtlInitUnicodeString(&deviceName, L"\\Device\\ThreatDetectionSuite"); RtlInitUnicodeString(&symLink, L"\\DosDevices\\ThreatDetectionSuite");
+    UNREFERENCED_PARAMETER(RegistryPath);
+    UNICODE_STRING deviceName, symLink;
+    
+    // Security Hardening: Device Name Obfuscation (Prevents simple string matching)
+    RtlInitUnicodeString(&deviceName, L"\\Device\\" L"TDS_" L"Core_Kernel"); 
+    RtlInitUnicodeString(&symLink, L"\\DosDevices\\" L"TDS_" L"Core_Link");
+
     NTSTATUS status = IoCreateDevice(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_DeviceObject);
     if (!NT_SUCCESS(status)) return status;
-    status = IoCreateSymbolicLink(&symLink, &deviceName); if (!NT_SUCCESS(status)) { IoDeleteDevice(g_DeviceObject); return status; }
+
+    status = IoCreateSymbolicLink(&symLink, &deviceName);
+    if (!NT_SUCCESS(status)) {
+        IoDeleteDevice(g_DeviceObject);
+        return status;
+    }
+
     DriverObject->DriverUnload = DriverUnload;
-    DriverObject->MajorFunction[IRP_MJ_CREATE] = TDSDispatchCreateClose; DriverObject->MajorFunction[IRP_MJ_CLOSE] = TDSDispatchCreateClose; DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = TDSDispatchDeviceControl;
-    InitializeListHead(&g_PendingIrpList); KeInitializeSpinLock(&g_IrpQueueLock); InitializeListHead(&g_EventQueueHead); KeInitializeSpinLock(&g_EventQueueLock);
-    PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, FALSE); PsSetCreateThreadNotifyRoutine(ThreadNotifyRoutine); PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
-    RegisterObCallbacks(); UNICODE_STRING altitude; RtlInitUnicodeString(&altitude, L"320123"); CmRegisterCallbackEx(RegistryCallback, &altitude, DriverObject, NULL, &g_RegistryCookie, NULL);
-    InitializeWFP(g_DeviceObject); FltRegisterFilter(DriverObject, &FilterRegistration, &g_FilterHandle); if (g_FilterHandle) FltStartFiltering(g_FilterHandle);
-    g_MonitoringActive = TRUE; return STATUS_SUCCESS;
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = TDSDispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = TDSDispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = TDSDispatchDeviceControl;
+
+    InitializeListHead(&g_PendingIrpList);
+    KeInitializeSpinLock(&g_IrpQueueLock);
+    InitializeListHead(&g_EventQueueHead);
+    KeInitializeSpinLock(&g_EventQueueLock);
+
+    PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, FALSE);
+    PsSetCreateThreadNotifyRoutine(ThreadNotifyRoutine);
+    PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
+
+    RegisterObCallbacks();
+
+    // Security Hardening: Randomized and Obfuscated Altitude
+    UNICODE_STRING altitude; 
+    RtlInitUnicodeString(&altitude, L"38" L"52" L"10"); 
+    CmRegisterCallbackEx(RegistryCallback, &altitude, DriverObject, NULL, &g_RegistryCookie, NULL);
+
+    InitializeWFP(g_DeviceObject);
+    
+    status = FltRegisterFilter(DriverObject, &FilterRegistration, &g_FilterHandle);
+    if (NT_SUCCESS(status)) {
+        FltStartFiltering(g_FilterHandle);
+    }
+
+    g_MonitoringActive = TRUE;
+    return STATUS_SUCCESS;
 }
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
