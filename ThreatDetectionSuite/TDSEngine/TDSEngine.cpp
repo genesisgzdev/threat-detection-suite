@@ -253,9 +253,16 @@ void TDSEngine::ScanProcessBehaviors() {
     static pNtQuerySystemInformation NtQuerySysInfo = (pNtQuerySystemInformation)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQuerySystemInformation");
     if (NtQuerySysInfo) {
         ULONG size = 0;
-        NtQuerySysInfo(SystemProcessInformation, NULL, 0, &size);
-        std::vector<BYTE> buffer(size);
-        if (NT_SUCCESS(NtQuerySysInfo(SystemProcessInformation, buffer.data(), size, NULL))) {
+        NTSTATUS status = NtQuerySysInfo(SystemProcessInformation, NULL, 0, &size);
+        std::vector<BYTE> buffer;
+        
+        while (status == 0xC0000004 /* STATUS_INFO_LENGTH_MISMATCH */) {
+            size += 8192; // Padding for concurrent process creations
+            buffer.resize(size);
+            status = NtQuerySysInfo(SystemProcessInformation, buffer.data(), size, &size);
+        }
+        
+        if (NT_SUCCESS(status)) {
             PSYSTEM_PROCESS_INFORMATION pInfo = (PSYSTEM_PROCESS_INFORMATION)buffer.data();
             while (true) {
                 DWORD pid = (DWORD)(ULONG_PTR)pInfo->UniqueProcessId;

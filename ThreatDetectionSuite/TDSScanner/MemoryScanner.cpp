@@ -318,24 +318,24 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
         if (ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) {
             LPVOID imageBase = peb.ImageBaseAddress;
             
-            // 2. Read PE headers from memory
+            // 2. Architecture-Agnostic PE Header Parsing (WOW64 Safe)
             IMAGE_DOS_HEADER dosHeader;
             if (ReadProcessMemory(hProcess, imageBase, &dosHeader, sizeof(dosHeader), NULL)) {
                 if (dosHeader.e_magic == IMAGE_DOS_SIGNATURE) {
-                    IMAGE_NT_HEADERS ntHeaders;
-                    if (ReadProcessMemory(hProcess, (PBYTE)imageBase + dosHeader.e_lfanew, &ntHeaders, sizeof(ntHeaders), NULL)) {
-                        if (ntHeaders.Signature == IMAGE_NT_SIGNATURE) {
+                    DWORD signature = 0;
+                    if (ReadProcessMemory(hProcess, (PBYTE)imageBase + dosHeader.e_lfanew, &signature, sizeof(signature), NULL) && signature == IMAGE_NT_SIGNATURE) {
+                        IMAGE_FILE_HEADER fileHeader;
+                        if (ReadProcessMemory(hProcess, (PBYTE)imageBase + dosHeader.e_lfanew + sizeof(DWORD), &fileHeader, sizeof(fileHeader), NULL)) {
                             
-                            // Hollowing Detection: Inspect memory protection of the .text section
-                            SIZE_T sectionsOffset = (SIZE_T)imageBase + dosHeader.e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + ntHeaders.FileHeader.SizeOfOptionalHeader;
-                            std::vector<IMAGE_SECTION_HEADER> sections(ntHeaders.FileHeader.NumberOfSections);
+                            SIZE_T optionalHeaderOffset = (SIZE_T)imageBase + dosHeader.e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER);
+                            SIZE_T sectionsOffset = optionalHeaderOffset + fileHeader.SizeOfOptionalHeader;
+                            std::vector<IMAGE_SECTION_HEADER> sections(fileHeader.NumberOfSections);
                             
-                            if (ReadProcessMemory(hProcess, (LPCVOID)sectionsOffset, sections.data(), sizeof(IMAGE_SECTION_HEADER) * ntHeaders.FileHeader.NumberOfSections, NULL)) {
+                            if (ReadProcessMemory(hProcess, (LPCVOID)sectionsOffset, sections.data(), sizeof(IMAGE_SECTION_HEADER) * fileHeader.NumberOfSections, NULL)) {
                                 for (const auto& sec : sections) {
                                     if (memcmp(sec.Name, ".text", 5) == 0 || (sec.Characteristics & IMAGE_SCN_MEM_EXECUTE)) {
                                         MEMORY_BASIC_INFORMATION mbi;
                                         if (VirtualQueryEx(hProcess, (PBYTE)imageBase + sec.VirtualAddress, &mbi, sizeof(mbi))) {
-                                            // Disk is PAGE_EXECUTE_READ. If memory is RWX or WriteCopy, payload was replaced.
                                             if (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_WRITECOPY) {
                                                 std::string sName(processName.begin(), processName.end());
                                                 Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PROCESS_BEHAVIOR, 
@@ -346,7 +346,7 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
                                 }
                             }
 
-                            DWORD memoryTimeStamp = ntHeaders.FileHeader.TimeDateStamp;
+                            DWORD memoryTimeStamp = fileHeader.TimeDateStamp;
                             
                             // 3. Read same PE file from disk and compare
                             HANDLE hFile = CreateFileW(processName.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
@@ -354,10 +354,10 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
                                 IMAGE_DOS_HEADER diskDos;
                                 DWORD read;
                                 if (ReadFile(hFile, &diskDos, sizeof(diskDos), &read, NULL) && diskDos.e_magic == IMAGE_DOS_SIGNATURE) {
-                                    SetFilePointer(hFile, diskDos.e_lfanew, NULL, FILE_BEGIN);
-                                    IMAGE_NT_HEADERS diskNt;
-                                    if (ReadFile(hFile, &diskNt, sizeof(diskNt), &read, NULL) && diskNt.Signature == IMAGE_NT_SIGNATURE) {
-                                        if (memoryTimeStamp != diskNt.FileHeader.TimeDateStamp) {
+                                    SetFilePointer(hFile, diskDos.e_lfanew + sizeof(DWORD), NULL, FILE_BEGIN);
+                                    IMAGE_FILE_HEADER diskFileHeader;
+                                    if (ReadFile(hFile, &diskFileHeader, sizeof(diskFileHeader), &read, NULL)) {
+                                        if (memoryTimeStamp != diskFileHeader.TimeDateStamp) {
                                             std::string sName(processName.begin(), processName.end());
                                             Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PROCESS_BEHAVIOR, 
                                                 "Process Hollowing detected: Memory TimeDateStamp mismatch", sName, GetProcessId(hProcess));

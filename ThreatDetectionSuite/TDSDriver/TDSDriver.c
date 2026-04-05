@@ -16,6 +16,7 @@ LIST_ENTRY g_PendingIrpList;
 
 KSPIN_LOCK g_EventQueueLock;
 LIST_ENTRY g_EventQueueHead;
+ULONG g_EventQueueCount = 0;
 
 PVOID g_ObRegistrationHandle = NULL;
 LARGE_INTEGER g_RegistryCookie = {0};
@@ -34,7 +35,6 @@ UINT64 g_FilterIdV6 = 0;
 UINT64 g_FilterIdDgV4 = 0;
 UINT64 g_FilterIdDgV6 = 0;
 
-// FIX: Professional, non-sequential WFP Callout GUIDs (Issue 3)
 // {EB6A1F3C-7D4E-4B2A-9C8D-1E2F3A4B5C6D}
 DEFINE_GUID(TDS_WFP_CALLOUT_V4_GUID, 0xeb6a1f3c, 0x7d4e, 0x4b2a, 0x9c, 0x8d, 0x1e, 0x2f, 0x3a, 0x4b, 0x5c, 0x6d);
 // {A1B2C3D4-E5F6-4A1B-8C9D-E0F1A2B3C4D5}
@@ -118,6 +118,7 @@ void DispatchPendingEvents() {
     PTDS_PENDING_IRP pIrp = CONTAINING_RECORD(irpEntry, TDS_PENDING_IRP, ListEntry);
     
     PLIST_ENTRY eventEntry = RemoveHeadList(&g_EventQueueHead);
+    g_EventQueueCount--;
     PEVENT_ITEM pEvent = CONTAINING_RECORD(eventEntry, EVENT_ITEM, ListEntry);
 
     PIRP Irp = pIrp->Irp;
@@ -125,6 +126,7 @@ void DispatchPendingEvents() {
     if (IoSetCancelRoutine(Irp, NULL) == NULL) {
         // IRP is being cancelled. Re-queue event and wait for next IRP.
         InsertHeadList(&g_EventQueueHead, &pEvent->ListEntry);
+        g_EventQueueCount++;
         KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
         KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
         ExFreePoolWithTag(pIrp, 'SDTe');
@@ -147,8 +149,8 @@ void DispatchPendingEvents() {
         
         ExFreePoolWithTag(pEvent, 'SDTe');
     } else {
-        // FIX: Buffer too small - Put event back in head, don't drop it (Issue 1)
         InsertHeadList(&g_EventQueueHead, &pEvent->ListEntry);
+        g_EventQueueCount++;
         Irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
         Irp->IoStatus.Information = 0;
         
@@ -163,7 +165,13 @@ void DispatchPendingEvents() {
 void QueueTDSEvent(PEVENT_ITEM item) {
     KIRQL irql;
     KeAcquireSpinLock(&g_EventQueueLock, &irql);
+    if (g_EventQueueCount >= EVENT_QUEUE_LIMIT) {
+        KeReleaseSpinLock(&g_EventQueueLock, irql);
+        ExFreePoolWithTag(item, 'SDTe');
+        return;
+    }
     InsertTailList(&g_EventQueueHead, &item->ListEntry);
+    g_EventQueueCount++;
     KeReleaseSpinLock(&g_EventQueueLock, irql);
     
     DispatchPendingEvents();
@@ -359,7 +367,6 @@ NTSTATUS TDSUnloadFilter(_In_ FLT_FILTER_UNLOAD_FLAGS Flags) {
 }
 
 FLT_POSTOP_CALLBACK_STATUS TDSPostCreateCallback(_Inout_ PFLT_CALLBACK_DATA Data, _In_ PCFLT_RELATED_OBJECTS FltObjects, _In_opt_ PVOID CompletionContext, _In_ FLT_POST_OPERATION_FLAGS Flags) {
-    // FIX: Check draining to avoid BSOD (Issue 2)
     if (Flags & FLTFL_POST_OPERATION_DRAINING) return FLT_POSTOP_FINISHED_PROCESSING;
     UNREFERENCED_PARAMETER(FltObjects); UNREFERENCED_PARAMETER(CompletionContext);
 

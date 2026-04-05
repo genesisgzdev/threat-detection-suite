@@ -4,9 +4,11 @@
 #include <wintrust.h>
 #include <softpub.h>
 #include <vector>
+#include <shellapi.h>
 #include "../Logger.h"
 
 #pragma comment(lib, "wintrust.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace TDS {
 
@@ -89,7 +91,17 @@ void RegistryDetector::ScanAppInitDLLs() {
 bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
     if (path.empty()) return false;
 
-    std::wstring lowerPath = path;
+    std::wstring targetPath = path;
+    
+    // Strip command line arguments to prevent WinVerifyTrust "File Not Found" false positives
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(path.c_str(), &argc);
+    if (argv && argc > 0) {
+        targetPath = argv[0];
+        LocalFree(argv);
+    }
+
+    std::wstring lowerPath = targetPath;
     std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
     if (lowerPath.find(L"putty.exe") != std::wstring::npos || lowerPath.find(L"notepad++.exe") != std::wstring::npos) {
         return false;
@@ -98,7 +110,7 @@ bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
     WINTRUST_FILE_INFO fileData;
     ZeroMemory(&fileData, sizeof(fileData));
     fileData.cbStruct = sizeof(WINTRUST_FILE_INFO);
-    fileData.pcwszFilePath = path.c_str();
+    fileData.pcwszFilePath = targetPath.c_str();
     fileData.hFile = NULL;
     fileData.pgKnownSubject = NULL;
 

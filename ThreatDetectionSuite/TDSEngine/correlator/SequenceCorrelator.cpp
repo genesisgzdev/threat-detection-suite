@@ -19,6 +19,11 @@ void SequenceCorrelator::HandleEvent(uint32_t pid, TDS_EVENT_TYPE type) {
         return;
     }
 
+    if (type == TDSEventProcessCreate) {
+        // Prevent state corruption from OS PID reuse
+        processEvents[pid].clear();
+    }
+
     auto& events = processEvents[pid];
     events.push_back({type, GetTickCount64()});
 
