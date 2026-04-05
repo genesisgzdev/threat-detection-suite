@@ -236,18 +236,36 @@ Cleanup:
     if (g_EngineHandle) { FwpmEngineClose0(g_EngineHandle); g_EngineHandle = NULL; } return status;
 }
 
+BOOLEAN IsEdrProcess(PEPROCESS Process) {
+    UNICODE_STRING edrName;
+    RtlInitUnicodeString(&edrName, L"TDSService.exe");
+    PUNICODE_STRING procName = NULL;
+    BOOLEAN match = FALSE;
+
+    if (NT_SUCCESS(SeLocateProcessImageName(Process, &procName))) {
+        if (RtlSuffixUnicodeString(&edrName, procName, TRUE)) {
+            match = TRUE;
+        }
+        ExFreePool(procName);
+    }
+    return match;
+}
+
 OB_PRE_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
     UNREFERENCED_PARAMETER(RegistrationContext);
     ULONG targetPid = 0;
+    PEPROCESS targetProcess = NULL;
 
     if (OperationInformation->ObjectType == *PsProcessType) {
-        targetPid = HandleToUlong(PsGetProcessId((PEPROCESS)OperationInformation->Object));
+        targetProcess = (PEPROCESS)OperationInformation->Object;
+        targetPid = HandleToUlong(PsGetProcessId(targetProcess));
     } else if (OperationInformation->ObjectType == *PsThreadType) {
-        targetPid = HandleToUlong(PsGetProcessId(IoThreadToProcess((PETHREAD)OperationInformation->Object)));
+        targetProcess = IoThreadToProcess((PETHREAD)OperationInformation->Object);
+        targetPid = HandleToUlong(PsGetProcessId(targetProcess));
     }
 
-    // Self-Protection: Protect EDR process and threads from external manipulation
-    if (g_EdrPid != 0 && targetPid == g_EdrPid) {
+    // Self-Protection: Protect EDR process and threads by PID or by Name
+    if ((g_EdrPid != 0 && targetPid == g_EdrPid) || (targetProcess && IsEdrProcess(targetProcess))) {
         ACCESS_MASK forbidden;
         if (OperationInformation->ObjectType == *PsProcessType) {
             forbidden = (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | 
