@@ -35,7 +35,7 @@ UINT64 g_FilterIdV6 = 0;
 UINT64 g_FilterIdDgV4 = 0;
 UINT64 g_FilterIdDgV6 = 0;
 
-// FIX: Professional, non-sequential WFP Callout GUIDs
+// Unique WFP Callout GUIDs
 DEFINE_GUID(TDS_WFP_CALLOUT_V4_GUID, 0xeb6a1f3c, 0x7d4e, 0x4b2a, 0x9c, 0x8d, 0x1e, 0x2f, 0x3a, 0x4b, 0x5c, 0x6d);
 DEFINE_GUID(TDS_WFP_CALLOUT_V6_GUID, 0xa1b2c3d4, 0xe5f6, 0x4a1b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd5);
 DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V4_GUID, 0xf1e2d3c4, 0xb5a6, 0x4987, 0x8e, 0x7d, 0x6c, 0x5b, 0x4a, 0x39, 0x28, 0x17);
@@ -48,7 +48,6 @@ typedef struct _TDS_PENDING_IRP {
 
 typedef struct _EVENT_ITEM {
     LIST_ENTRY ListEntry;
-    ULONG TotalSize;
 } EVENT_ITEM, *PEVENT_ITEM;
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
@@ -134,6 +133,9 @@ void DispatchPendingEvents() {
         return;
     }
 
+    KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
+    KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
+
     PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
     ULONG outLen = irpSp->Parameters.DeviceIoControl.OutputBufferLength;
     
@@ -144,23 +146,14 @@ void DispatchPendingEvents() {
         RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, header, requiredLen);
         Irp->IoStatus.Status = STATUS_SUCCESS;
         Irp->IoStatus.Information = requiredLen;
-        
-        KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
-        KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
-        
-        ExFreePoolWithTag(pEvent, 'SDTe');
     } else {
-        InsertHeadList(&g_EventQueueHead, &pEvent->ListEntry);
-        g_EventQueueCount++;
         Irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
         Irp->IoStatus.Information = 0;
-        
-        KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
-        KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
     }
 
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
     ExFreePoolWithTag(pIrp, 'SDTe');
+    ExFreePoolWithTag(pEvent, 'SDTe');
 }
 
 void QueueTDSEvent(PEVENT_ITEM item) {
@@ -184,16 +177,15 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
     if (inMetaValues->currentMetadataValues & FWPS_METADATA_FIELD_PROCESS_ID) {
         ULONG pid = (ULONG)inMetaValues->processId;
         ULONG dataSize = sizeof(TDS_NETWORK_EVENT_DATA);
-        ULONG totalItemSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
-        PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, totalItemSize, 'SDTe');
+        PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
         if (item) {
-            RtlZeroMemory(item, totalItemSize); item->TotalSize = totalItemSize;
+            RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
             PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
             header->Type = TDSEventNetworkConnect; header->ProcessId = pid; header->DataSize = dataSize;
             KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
             PTDS_NETWORK_EVENT_DATA nEvent = (PTDS_NETWORK_EVENT_DATA)(header + 1);
             if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4 || inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V4) {
-                nEvent->AddressFamily = 2; // AF_INET
+                nEvent->AddressFamily = 2;
                 UINT16 addrIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) ? FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS : FWPS_FIELD_DATAGRAM_DATA_V4_IP_REMOTE_ADDRESS;
                 UINT16 portIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) ? FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT : FWPS_FIELD_DATAGRAM_DATA_V4_IP_REMOTE_PORT;
                 UINT16 protoIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) ? FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL : FWPS_FIELD_DATAGRAM_DATA_V4_IP_PROTOCOL;
@@ -201,7 +193,7 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
                 if (inFixedValues->incomingValue[portIdx].value.type == FWP_UINT16) nEvent->RemotePort = inFixedValues->incomingValue[portIdx].value.uint16;
                 if (inFixedValues->incomingValue[protoIdx].value.type == FWP_UINT8) nEvent->Protocol = inFixedValues->incomingValue[protoIdx].value.uint8;
             } else if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6 || inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V6) {
-                nEvent->AddressFamily = 23; // AF_INET6
+                nEvent->AddressFamily = 23;
                 UINT16 addrIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6) ? FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_ADDRESS : FWPS_FIELD_DATAGRAM_DATA_V6_IP_REMOTE_ADDRESS;
                 UINT16 portIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6) ? FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_REMOTE_PORT : FWPS_FIELD_DATAGRAM_DATA_V6_IP_REMOTE_PORT;
                 UINT16 protoIdx = (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V6) ? FWPS_FIELD_ALE_AUTH_CONNECT_V6_IP_PROTOCOL : FWPS_FIELD_DATAGRAM_DATA_V6_IP_PROTOCOL;
@@ -277,11 +269,11 @@ FLT_POSTOP_CALLBACK_STATUS TDSPostCreateCallback(_Inout_ PFLT_CALLBACK_DATA Data
     if (Data->Iopb->Parameters.Create.Options & FILE_DELETE_ON_CLOSE) {
         PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
         if (NT_SUCCESS(FltGetFileNameInformation(Data, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT, &nameInfo))) {
-            FltParseFileNameInformation(nameInfo); ULONG pathLen = nameInfo->Name.Length; ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen;
-            PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
+            FltParseFileNameInformation(nameInfo); ULONG pathLen = nameInfo->Name.Length;
+            PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA) + pathLen, 'SDTe');
             if (item) {
-                RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize); item->TotalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
-                PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1); header->Type = TDSEventFileDelete; header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); header->DataSize = dataSize;
+                RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA) + pathLen);
+                PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1); header->Type = TDSEventFileDelete; header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); header->DataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen;
                 KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp); PTDS_FILE_EVENT_DATA fData = (PTDS_FILE_EVENT_DATA)(header + 1);
                 fData->Operation = 2; fData->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA); RtlCopyMemory((PUCHAR)header + fData->FilePathOffset, nameInfo->Name.Buffer, pathLen);
                 QueueTDSEvent(item);
@@ -293,7 +285,6 @@ FLT_POSTOP_CALLBACK_STATUS TDSPostCreateCallback(_Inout_ PFLT_CALLBACK_DATA Data
 }
 
 FLT_PREOP_CALLBACK_STATUS TDSPreSetInformationCallback(_Inout_ PFLT_CALLBACK_DATA Data, _In_ PCFLT_RELATED_OBJECTS FltObjects, _Outptr_opt_ PVOID *CompletionContext) {
-    UNREFERENCED_PARAMETER(FltObjects); UNREFERENCED_PARAMETER(CompletionContext);
     FILE_INFORMATION_CLASS infoClass = Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
     if (infoClass == FileRenameInformation || infoClass == FileRenameInformationEx || infoClass == FileDispositionInformation || infoClass == FileDispositionInformationEx) {
         PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
@@ -303,7 +294,7 @@ FLT_PREOP_CALLBACK_STATUS TDSPreSetInformationCallback(_Inout_ PFLT_CALLBACK_DAT
             ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen + targetLen;
             PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
             if (item) {
-                RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize); item->TotalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+                RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
                 PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1); header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); header->DataSize = dataSize;
                 KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp); PTDS_FILE_EVENT_DATA fData = (PTDS_FILE_EVENT_DATA)(header + 1);
                 fData->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA); RtlCopyMemory((PUCHAR)header + fData->FilePathOffset, nameInfo->Name.Buffer, pathLen);
@@ -333,7 +324,7 @@ NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument
         ULONG dataSize = sizeof(TDS_REGISTRY_EVENT_DATA) + keyPath.Length + valueNameLen + dataBufSize;
         PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
         if (item) {
-            RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize); item->TotalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+            RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
             PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
             header->Type = (notifyClass == RegNtPreSetValueKey) ? TDSEventRegistrySet : (notifyClass == RegNtPreDeleteKey || notifyClass == RegNtPreDeleteValueKey) ? TDSEventRegistryDelete : TDSEventRegistryRename;
             header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); header->DataSize = dataSize; KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
@@ -355,7 +346,7 @@ void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
     ULONG dataSize = isRemote ? sizeof(TDS_REMOTE_THREAD_DATA) : 0;
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
     if (item) {
-        RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize); item->TotalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+        RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
         PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1); header->Type = isRemote ? TDSEventRemoteThread : TDSEventThreadCreate;
         header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); header->ThreadId = HandleToUlong(ThreadId); header->DataSize = dataSize;
         KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
@@ -422,7 +413,7 @@ void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTI
     ULONG dataSize = sizeof(TDS_PROCESS_EVENT_DATA) + imgLen + cmdLen;
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
     if (!item) return;
-    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize); item->TotalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
     PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
     header->Type = CreateInfo ? TDSEventProcessCreate : TDSEventProcessTerminate; header->ProcessId = HandleToUlong(ProcessId); header->DataSize = dataSize;
     KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
@@ -440,7 +431,7 @@ void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIM
     ULONG dataSize = sizeof(TDS_IMAGE_LOAD_DATA) + imgLen;
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
     if (!item) return;
-    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize); item->TotalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
+    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
     PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
     header->Type = TDSEventImageLoad; header->ProcessId = HandleToUlong(ProcessId); header->DataSize = dataSize;
     KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);

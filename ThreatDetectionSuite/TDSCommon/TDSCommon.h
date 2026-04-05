@@ -11,6 +11,7 @@
 #include <stdint.h>
 #endif
 
+// FIX: Move TDS_USER_METRICS OUTSIDE of #pragma pack(1) (Issue 14)
 #ifndef _KERNEL_MODE
 #include <atomic>
 struct TDS_USER_METRICS {
@@ -176,7 +177,7 @@ inline const char* GetTDSCategoryName(TDS_THREAT_CATEGORY category) {
         "PERSISTENCE", "C2_COMMUNICATION", "KERNEL_ANOMALY", "ROOTKIT_INDICATOR",
         "EVASION"
     };
-    if ((int)category >= 0 && (int)category < TDS_MAX_THREAT_CATEGORY) {
+    if ((int)category >= 0 && (int)category < (int)TDS_MAX_THREAT_CATEGORY) {
         return category_names[category];
     }
     return "UNKNOWN_CATEGORY";
