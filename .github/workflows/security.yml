@@ -22,14 +22,20 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run Snyk to check for vulnerabilities
+      - name: Install Snyk CLI
         if: steps.check_secrets.outputs.skip == 'false'
-        uses: snyk/actions/cpp@master
-        continue-on-error: true
+        run: npm install -g snyk
+
+      - name: Snyk Auth
+        if: steps.check_secrets.outputs.skip == 'false'
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --sarif-file-output=snyk.sarif
+
+      - name: Snyk Code Test
+        if: steps.check_secrets.outputs.skip == 'false'
+        run: |
+          snyk code test --sarif-file-output=snyk.sarif || true
 
       - name: Upload Snyk report to GitHub Security
         if: steps.check_secrets.outputs.skip == 'false'
