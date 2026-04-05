@@ -11,16 +11,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Verify Secrets
+        run: |
+          if [ -z "${{ secrets.SNYK_TOKEN }}" ]; then
+            echo "::error::SNYK_TOKEN is missing. Please add it to Repository Secrets."
+            exit 1
+          fi
+
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/setup@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      
       - name: Snyk Code Test
-        run: snyk code test --sarif-file-output=snyk.sarif || true
+        run: |
+          snyk code test --sarif-file-output=snyk.sarif || echo "Snyk found issues, check the Security tab."
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
       - name: Upload Snyk report to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif
+        if: always()
 
   osv-scanner:
     runs-on: ubuntu-latest
