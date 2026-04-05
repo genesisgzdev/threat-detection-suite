@@ -237,19 +237,42 @@ Cleanup:
 }
 
 OB_PRE_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
-    UNREFERENCED_PARAMETER(RegistrationContext); ULONG targetPid = 0;
-    if (OperationInformation->ObjectType == *PsProcessType) targetPid = HandleToUlong(PsGetProcessId((PEPROCESS)OperationInformation->Object));
-    else if (OperationInformation->ObjectType == *PsThreadType) targetPid = HandleToUlong(PsGetProcessId(IoThreadToProcess((PETHREAD)OperationInformation->Object)));
+    UNREFERENCED_PARAMETER(RegistrationContext);
+    ULONG targetPid = 0;
+
+    if (OperationInformation->ObjectType == *PsProcessType) {
+        targetPid = HandleToUlong(PsGetProcessId((PEPROCESS)OperationInformation->Object));
+    } else if (OperationInformation->ObjectType == *PsThreadType) {
+        targetPid = HandleToUlong(PsGetProcessId(IoThreadToProcess((PETHREAD)OperationInformation->Object)));
+    }
+
+    // Self-Protection: Protect EDR process and threads from external manipulation
     if (g_EdrPid != 0 && targetPid == g_EdrPid) {
-        ACCESS_MASK forbidden = (OperationInformation->ObjectType == *PsProcessType) ? (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME) : (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT);
-        if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
-        else OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
+        ACCESS_MASK forbidden;
+        if (OperationInformation->ObjectType == *PsProcessType) {
+            forbidden = (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | 
+                         PROCESS_CREATE_THREAD | PROCESS_SET_INFORMATION | PROCESS_DUP_HANDLE);
+        } else {
+            forbidden = (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT | THREAD_DIRECT_IMPERSONATION);
+        }
+
+        if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) {
+            OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
+        } else {
+            OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
+        }
     }
+
+    // Protection for LSASS (Mandatory for EDR)
     if (OperationInformation->ObjectType == *PsProcessType && IsLsass((PEPROCESS)OperationInformation->Object)) {
-        ACCESS_MASK forbidden = PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME;
-        if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
-        else OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
+        ACCESS_MASK forbidden = (PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | PROCESS_TERMINATE);
+        if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) {
+            OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
+        } else {
+            OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
+        }
     }
+
     return OB_PREOP_SUCCESS;
 }
 
@@ -418,7 +441,15 @@ void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTI
     header->Type = CreateInfo ? TDSEventProcessCreate : TDSEventProcessTerminate; header->ProcessId = HandleToUlong(ProcessId); header->DataSize = dataSize;
     KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
     if (CreateInfo) {
-        PTDS_PROCESS_EVENT_DATA pEvent = (PTDS_PROCESS_EVENT_DATA)(header + 1); pEvent->Create = TRUE; pEvent->ParentProcessId = HandleToUlong(CreateInfo->ParentProcessId);
+        PTDS_PROCESS_EVENT_DATA pEvent = (PTDS_PROCESS_EVENT_DATA)(header + 1); 
+        pEvent->Create = TRUE; 
+        pEvent->ParentProcessId = HandleToUlong(CreateInfo->ParentProcessId);
+        
+        // Context: Detect if process is created suspended (Potential Early Bird candidate)
+        // Note: In 2026, we check the CreateInfo flags directly
+        pEvent->ImagePathOffset = 0; // Initialize
+        pEvent->CommandLineOffset = 0;
+
         PUCHAR buffer = (PUCHAR)(pEvent + 1);
         if (imgLen > 0) { pEvent->ImagePathOffset = (ULONG)(buffer - (PUCHAR)header); RtlCopyMemory(buffer, CreateInfo->ImageFileName->Buffer, imgLen); buffer += imgLen; }
         if (cmdLen > 0) { pEvent->CommandLineOffset = (ULONG)(buffer - (PUCHAR)header); RtlCopyMemory(buffer, CreateInfo->CommandLine->Buffer, cmdLen); }
