@@ -12,13 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Snyk to check for vulnerabilities
-        uses: snyk/actions/cpp@master
-        continue-on-error: true
+      - name: Setup Snyk
+        uses: snyk/actions/setup@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --sarif-file-output=snyk.sarif
+
+      - name: Snyk Code Test
+        run: |
+          snyk code test --sarif-file-output=snyk.sarif || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       - name: Upload Snyk report to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
