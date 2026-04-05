@@ -70,16 +70,24 @@ PVOID GetProcessPeb(PEPROCESS Process) {
 }
 
 BOOLEAN IsLsass(PEPROCESS Process) {
-    UNICODE_STRING lsassName;
-    RtlInitUnicodeString(&lsassName, L"\\Windows\\System32\\lsass.exe");
+    UNICODE_STRING lsassPrefix;
+    RtlInitUnicodeString(&lsassPrefix, L"\\Device\\HarddiskVolume"); 
+    UNICODE_STRING lsassSuffix;
+    RtlInitUnicodeString(&lsassSuffix, L"\\Windows\\System32\\lsass.exe");
+    
     PUNICODE_STRING procName = NULL;
-    SeLocateProcessImageName(Process, &procName);
-    if (procName) {
-        BOOLEAN match = RtlSuffixUnicodeString(&lsassName, procName, TRUE);
+    BOOLEAN match = FALSE;
+
+    if (NT_SUCCESS(SeLocateProcessImageName(Process, &procName))) {
+        // FIX: Mandatory path validation (Issue: Path Spoofing Evasion)
+        // Obliga a que empiece en el disco duro y termine en la carpeta real de Windows
+        if (RtlPrefixUnicodeString(&lsassPrefix, procName, TRUE) && 
+            RtlSuffixUnicodeString(&lsassSuffix, procName, TRUE)) {
+            match = TRUE;
+        }
         ExFreePool(procName);
-        return match;
     }
-    return FALSE;
+    return match;
 }
 
 VOID CancelPendingIrp(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
