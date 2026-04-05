@@ -29,7 +29,7 @@ add_executable(TDSService
     ThreatDetectionSuite/TDSScanner/MemoryScanner.cpp
     ThreatDetectionSuite/TDSScanner/Entropy.cpp
 )
-target_link_libraries(TDSService wbemuuid taskschd comsuppw advapi32 ntdll ws2_32 iphlpapi wintrust tdh)
+target_link_libraries(TDSService wbemuuid taskschd comsuppw advapi32 ntdll ws2_32 iphlpapi wintrust tdh dbghelp)
 
 # Integration Bridge & Test Utility
 add_executable(TDSBridge tools/bridge/TDSBridge.cpp)

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <chrono>
 #include "../TDSCommon/TDSCommon.h"
+#include "ForensicManager.h"
 
 namespace TDS {
 
@@ -20,6 +21,11 @@ public:
                    const std::string& description, const std::string& ioc, uint32_t pid) {
         std::lock_guard<std::mutex> lock(m_mutex);
         
+        // Automated Forensics: Capture memory dump for CRITICAL alerts
+        if (severity >= TDS_SEVERITY_CRITICAL && pid != 0) {
+            ForensicManager::Instance().CaptureProcessDump(pid, GetTDSCategoryName(category));
+        }
+
         TDS_THREAT_LOG log = {};
         log.ThreatId = m_counter++;
         log.Severity = severity;
