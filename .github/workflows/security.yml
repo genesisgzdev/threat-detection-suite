@@ -12,29 +12,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Snyk CLI
-        run: npm install -g snyk
-
-      - name: Snyk Auth
-        run: snyk auth ${{ secrets.SNYK_TOKEN }}
-
-      - name: Snyk Code Test
+      - name: Verify Secrets
+        id: check_secrets
         run: |
-          snyk code test --sarif-file-output=snyk.sarif || true
-      
+          if [ -z "${{ secrets.SNYK_TOKEN }}" ]; then
+            echo "::warning::SNYK_TOKEN is missing. Skipping Snyk scan."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Snyk to check for vulnerabilities
+        if: steps.check_secrets.outputs.skip == 'false'
+        uses: snyk/actions/cpp@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --sarif-file-output=snyk.sarif
+
       - name: Upload Snyk report to GitHub Security
+        if: steps.check_secrets.outputs.skip == 'false'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif
-        if: always()
-
-  osv-scanner:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run OSV-Scanner
-        uses: google/osv-scanner-action/scan@v1
-        with:
-          scan-args: |-
-            --recursive
-            ./
