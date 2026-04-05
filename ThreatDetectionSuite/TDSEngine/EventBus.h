@@ -27,7 +27,6 @@ public:
         return std::nullopt;
     }
 
-    // FIX: Proper shutdown signaling (Issue 20)
     void Stop() {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_stop = true;

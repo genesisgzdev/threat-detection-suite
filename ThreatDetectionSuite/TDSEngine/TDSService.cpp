@@ -8,6 +8,7 @@
 #include "../TDSCommon/TDSEvents.h"
 #include "TDSEngine.h"
 #include "collectors/EtwCollector.h"
+#include "../TDSScanner/MemoryScanner.h"
 
 std::atomic<bool> g_Running{ false };
 
@@ -217,6 +218,9 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode) {
 DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     g_Running = true;
 
+    // Initialize YARA Memory Engine
+    TDS::MemoryScanner::InitializeYara("C:\\TDS\\rules\\apt_payloads.yar");
+
     TDS::TDSEngine engine;
     engine.Start();
 
@@ -269,6 +273,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     etw.Stop();
     engine.Shutdown();
     if (driverThread.joinable()) driverThread.join();
+    TDS::MemoryScanner::ShutdownYara();
 
     return ERROR_SUCCESS;
 }

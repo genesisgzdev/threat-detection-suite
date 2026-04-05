@@ -4,12 +4,11 @@
 #include <vector>
 #include <mutex>
 #include <fstream>
+#include <chrono>
 #include "../TDSCommon/TDSCommon.h"
 
 namespace TDS {
 
-// FIX: explicitly note C++11 thread-safe static initialization for singleton (Issue 30)
-// Requires compiler supporting C++11 Magic Statics (MSVC /std:c++14 or higher)
 class Logger {
 public:
     static Logger& Instance() {
@@ -25,7 +24,11 @@ public:
         log.ThreatId = m_counter++;
         log.Severity = severity;
         log.Category = category;
-        log.Timestamp = GetTickCount64();
+        
+        // Timestamp (Epoch milliseconds)
+        auto now = std::chrono::system_clock::now();
+        log.Timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        
         log.AssociatedPid = pid;
         
         strncpy_s(log.Description, description.c_str(), _TRUNCATE);
@@ -36,7 +39,6 @@ public:
         }
         m_buffer.push_back(log);
         
-        // FIX: Prevent format string injection by explicitly using %s for description (Issue 31)
         printf("[%s] [%s] %s (PID: %u)\n", 
                GetTDSSeverityName(severity), 
                GetTDSCategoryName(category), 
@@ -52,7 +54,6 @@ private:
     Logger() : m_counter(0) {}
     
     void FlushToDiskInternal() {
-        // FIX: Actually write events to disk before clearing (Issue 29)
         std::ofstream ofs("tds_threat_events.jsonl", std::ios::app);
         if (ofs.is_open()) {
             for (const auto& log : m_buffer) {

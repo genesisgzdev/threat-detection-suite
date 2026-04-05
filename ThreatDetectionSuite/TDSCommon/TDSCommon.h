@@ -47,7 +47,8 @@ typedef enum _TDS_EVENT_TYPE {
     TDSEventFileCreate = 11,
     TDSEventFileDelete = 12,
     TDSEventRegistrySet = 13,
-    TDSEventRegistryDelete = 14
+    TDSEventRegistryDelete = 14,
+    TDSEventRegistryRename = 15
 } TDS_EVENT_TYPE;
 
 typedef enum _TDS_THREAT_SEVERITY {
@@ -92,7 +93,7 @@ typedef enum _TDS_REMEDIATION_ACTION {
 } TDS_REMEDIATION_ACTION;
 
 typedef struct _TDS_NETWORK_EVENT_DATA {
-    uint8_t AddressFamily; // AF_INET or AF_INET6
+    uint8_t AddressFamily; 
     uint8_t Protocol;
     uint16_t RemotePort;
     union {
@@ -129,7 +130,7 @@ typedef struct _TDS_IMAGE_LOAD_DATA {
 typedef struct _TDS_FILE_EVENT_DATA {
     uint8_t Operation; // 1: Create, 2: Delete, 3: Rename
     uint32_t FilePathOffset;
-    uint32_t TargetPathOffset; // Only for rename
+    uint32_t TargetPathOffset; 
 } TDS_FILE_EVENT_DATA, *PTDS_FILE_EVENT_DATA;
 
 typedef struct _TDS_HANDLE_OP_DATA {
@@ -137,6 +138,14 @@ typedef struct _TDS_HANDLE_OP_DATA {
     uint32_t DesiredAccess;
     uint8_t IsThread;
 } TDS_HANDLE_OP_DATA, *PTDS_HANDLE_OP_DATA;
+
+typedef struct _TDS_REGISTRY_EVENT_DATA {
+    uint32_t Type; // REG_SZ, etc.
+    uint32_t KeyPathOffset;
+    uint32_t ValueNameOffset;
+    uint32_t DataOffset;
+    uint32_t DataSize;
+} TDS_REGISTRY_EVENT_DATA, *PTDS_REGISTRY_EVENT_DATA;
 
 typedef struct _TDS_THREAT_LOG {
     uint32_t ThreatId;
@@ -155,14 +164,6 @@ typedef struct _TDS_REMEDIATION_RESULT {
     uint32_t ErrorCode;
     char StatusMessage[256];
 } TDS_REMEDIATION_RESULT, *PTDS_REMEDIATION_RESULT;
-
-typedef struct _TDS_REGISTRY_EVENT_DATA {
-    uint32_t Type;
-    uint32_t KeyPathOffset;
-    uint32_t ValueNameOffset;
-    uint32_t DataOffset;
-    uint32_t DataSize;
-} TDS_REGISTRY_EVENT_DATA, *PTDS_REGISTRY_EVENT_DATA;
 
 #pragma pack(pop)
 

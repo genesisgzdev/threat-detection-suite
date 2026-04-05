@@ -6,10 +6,14 @@
 #include <algorithm>
 #include <winternl.h>
 #include <unordered_set>
+#include <amsi.h>
 #include "Logger.h"
 #include "detectors/NetworkDetector.h"
+#include "ips/IPSManager.h"
 
 #pragma comment(lib, "ntdll.lib")
+#pragma comment(lib, "amsi.lib")
+#pragma comment(lib, "version.lib")
 
 namespace TDS {
 
@@ -73,6 +77,9 @@ void TDSEngine::EvaluateThreat(const Event& event) {
                         std::string cmd(data->CommandLine.begin(), data->CommandLine.end());
                         Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin abuse detected", cmd, event.Pid);
                         m_contextManager->UpdateScore(event.Pid, score);
+                        
+                        IPSManager::ContainProcess(event.Pid);
+                        IPSManager::TerminateMaliciousProcess(event.Pid);
                     } else if (score >= 50) {
                         std::string cmd(data->CommandLine.begin(), data->CommandLine.end());
                         Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "Suspicious LOLBin execution", cmd, event.Pid);
@@ -86,6 +93,9 @@ void TDSEngine::EvaluateThreat(const Event& event) {
             if (auto data = std::get_if<RemoteThreadEvent>(&event.Data)) {
                 Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Remote thread injection detected", "Target PID: " + std::to_string(data->TargetPid), event.Pid);
                 m_contextManager->UpdateScore(data->TargetPid, 50);
+                
+                IPSManager::ContainProcess(event.Pid);
+                IPSManager::TerminateMaliciousProcess(event.Pid);
             }
             break;
         }
@@ -117,7 +127,34 @@ bool TDSEngine::IsLolbasBinary(const std::wstring& path) {
     std::wstring filename = (lastSlash == std::wstring::npos) ? path : path.substr(lastSlash + 1);
     std::wstring lower = filename;
     for (auto& c : lower) c = towlower(c);
-    return m_lolbasBinaries.find(lower) != m_lolbasBinaries.end();
+    
+    if (m_lolbasBinaries.find(lower) != m_lolbasBinaries.end()) return true;
+
+    // Check OriginalFilename from PE Version Info to prevent renaming evasions
+    DWORD handle = 0;
+    DWORD size = GetFileVersionInfoSizeW(path.c_str(), &handle);
+    if (size > 0) {
+        std::vector<BYTE> versionData(size);
+        if (GetFileVersionInfoW(path.c_str(), handle, size, versionData.data())) {
+            LPVOID buffer = nullptr;
+            UINT len = 0;
+            
+            // \VarFileInfo\Translation to get the language and code page
+            struct LANGANDCODEPAGE { WORD wLanguage; WORD wCodePage; } *lpTranslate;
+            if (VerQueryValueW(versionData.data(), L"\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &len) && len >= sizeof(LANGANDCODEPAGE)) {
+                WCHAR subBlock[256];
+                swprintf_s(subBlock, L"\\StringFileInfo\\%04x%04x\\OriginalFilename", lpTranslate[0].wLanguage, lpTranslate[0].wCodePage);
+                
+                if (VerQueryValueW(versionData.data(), subBlock, &buffer, &len) && buffer) {
+                    std::wstring origName = (LPCWSTR)buffer;
+                    std::transform(origName.begin(), origName.end(), origName.begin(), ::towlower);
+                    if (m_lolbasBinaries.find(origName) != m_lolbasBinaries.end()) return true;
+                }
+            }
+        }
+    }
+    
+    return false;
 }
 
 int TDSEngine::CalculateLOLBinRiskScore(const std::wstring& commandLine) {
@@ -136,6 +173,18 @@ int TDSEngine::CalculateLOLBinRiskScore(const std::wstring& commandLine) {
 
     if (lower.find(L"-noprofile") != std::wstring::npos) score += 10;
     if (lower.find(L"hidden") != std::wstring::npos) score += 20;
+
+    // Inspect deobfuscated payload using AMSI
+    HAMSICONTEXT amsiContext;
+    if (SUCCEEDED(AmsiInitialize(L"TDSEngine", &amsiContext))) {
+        AMSI_RESULT result;
+        if (SUCCEEDED(AmsiScanString(amsiContext, commandLine.c_str(), L"LOLBinCmdline", NULL, &result))) {
+            if (AmsiResultIsMalware(result)) {
+                score += 85; 
+            }
+        }
+        AmsiUninitialize(amsiContext);
+    }
 
     return min(score, 100);
 }
@@ -162,7 +211,6 @@ void TDSEngine::ScanLOLBins() {
 }
 
 void TDSEngine::ScanProcessBehaviors() {
-    // FIX: DKOM Detection (Issue 5)
     std::unordered_set<DWORD> snapshotPids;
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot != INVALID_HANDLE_VALUE) {

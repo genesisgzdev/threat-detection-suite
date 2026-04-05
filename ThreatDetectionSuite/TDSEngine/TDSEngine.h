@@ -30,7 +30,6 @@ struct CaseInsensitiveEqual {
     }
 };
 
-// FIX: Use uint64_t for observation count and provide CoV (Issues 19, 23)
 struct BeaconMetrics {
     uint64_t m_n = 0;
     double m_oldM = 0, m_newM = 0;

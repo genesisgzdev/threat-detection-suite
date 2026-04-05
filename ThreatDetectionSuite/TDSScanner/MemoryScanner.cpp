@@ -3,16 +3,73 @@
 #include <algorithm>
 #include <tlhelp32.h>
 #include <psapi.h>
+#include <winternl.h>
 #include "../TDSEngine/Logger.h"
+#include "../TDSEngine/ips/IPSManager.h"
+
+#pragma comment(lib, "ntdll.lib")
+#pragma comment(lib, "yara.lib")
 
 namespace TDS {
+
+YR_RULES* MemoryScanner::s_yaraRules = nullptr;
+
+bool MemoryScanner::InitializeYara(const std::string& rulePath) {
+    if (yr_initialize() != ERROR_SUCCESS) return false;
+
+    YR_COMPILER* compiler = nullptr;
+    if (yr_compiler_create(&compiler) != ERROR_SUCCESS) return false;
+
+    FILE* ruleFile = nullptr;
+    fopen_s(&ruleFile, rulePath.c_str(), "r");
+    if (!ruleFile) {
+        yr_compiler_destroy(compiler);
+        return false;
+    }
+
+    if (yr_compiler_add_file(compiler, ruleFile, NULL, rulePath.c_str()) != 0) {
+        fclose(ruleFile);
+        yr_compiler_destroy(compiler);
+        return false;
+    }
+
+    yr_compiler_get_rules(compiler, &s_yaraRules);
+    fclose(ruleFile);
+    yr_compiler_destroy(compiler);
+    
+    Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_PROCESS_BEHAVIOR, "YARA Memory Engine Initialized", rulePath, 0);
+    return true;
+}
+
+void MemoryScanner::ShutdownYara() {
+    if (s_yaraRules) {
+        yr_rules_destroy(s_yaraRules);
+        s_yaraRules = nullptr;
+    }
+    yr_finalize();
+}
+
+int MemoryScanner::YaraCallback(YR_SCAN_CONTEXT* context, int message, void* message_data, void* user_data) {
+    if (message == CALLBACK_MSG_RULE_MATCHING) {
+        YR_RULE* rule = (YR_RULE*)message_data;
+        DWORD pid = *(DWORD*)user_data;
+        
+        std::string ruleName = rule->identifier;
+        Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_MEMORY_ANOMALY, "YARA Rule Match in Memory: " + ruleName, "Memory Payload", pid);
+        
+        // IPS Intervention
+        IPSManager::ContainProcess(pid);
+        IPSManager::TerminateMaliciousProcess(pid);
+    }
+    return CALLBACK_CONTINUE;
+}
 
 bool MemoryScanner::DetectNopSleds(HANDLE hProcess, LPVOID startAddress, SIZE_T regionSize) {
     const SIZE_T CHUNK_SIZE = 4096; 
     BYTE buffer[CHUNK_SIZE + 32];
     SIZE_T bytesRead = 0;
     
-    // FIX: Proportional sampling for large regions (Issue 28)
+    // Proportional sampling for large regions
     std::vector<SIZE_T> offsets = { 0 };
     if (regionSize > CHUNK_SIZE * 2) {
         offsets.push_back(regionSize / 2);
@@ -47,14 +104,96 @@ bool MemoryScanner::DetectNopSleds(HANDLE hProcess, LPVOID startAddress, SIZE_T 
 }
 
 void MemoryScanner::ScanProcessHooks(HANDLE hProcess) {
+    // 1. Deep Hooking Scanner: Compare memory module against disk file
+    HMODULE hMods[1024];
+    DWORD cbNeeded;
+    if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
+        for (unsigned i = 0; i < (cbNeeded / sizeof(HMODULE)); i++) {
+            WCHAR szModName[MAX_PATH];
+            if (GetModuleFileNameExW(hProcess, hMods[i], szModName, sizeof(szModName) / sizeof(WCHAR))) {
+                std::wstring modNameStr = szModName;
+                std::transform(modNameStr.begin(), modNameStr.end(), modNameStr.begin(), ::towlower);
+                
+                // Optimize: only scan critical core DLLs for deep mid-function hooks
+                if (modNameStr.find(L"ntdll.dll") != std::wstring::npos || 
+                    modNameStr.find(L"kernel32.dll") != std::wstring::npos ||
+                    modNameStr.find(L"kernelbase.dll") != std::wstring::npos) {
+                    
+                    HANDLE hFile = CreateFileW(szModName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+                    if (hFile != INVALID_HANDLE_VALUE) {
+                        HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, NULL);
+                        if (hMap) {
+                            LPVOID pMapped = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+                            if (pMapped) {
+                                PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)pMapped;
+                                PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)((PBYTE)pMapped + pDos->e_lfanew);
+                                PIMAGE_SECTION_HEADER pSec = IMAGE_FIRST_SECTION(pNt);
+                                
+                                // Parse Relocations to avoid ASLR False Positives
+                                std::unordered_set<SIZE_T> relocatedRVAs;
+                                PIMAGE_DATA_DIRECTORY relocDir = &pNt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+                                if (relocDir->VirtualAddress && relocDir->Size) {
+                                    PIMAGE_BASE_RELOCATION pReloc = (PIMAGE_BASE_RELOCATION)((PBYTE)pMapped + relocDir->VirtualAddress);
+                                    while (pReloc->VirtualAddress != 0) {
+                                        DWORD numEntries = (pReloc->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+                                        PWORD pEntry = (PWORD)(pReloc + 1);
+                                        for (DWORD e = 0; e < numEntries; e++) {
+                                            int type = pEntry[e] >> 12;
+                                            // Filter x64 and x86 relocation types
+                                            if (type == IMAGE_REL_BASED_DIR64 || type == IMAGE_REL_BASED_HIGHLOW) {
+                                                SIZE_T rva = pReloc->VirtualAddress + (pEntry[e] & 0xFFF);
+                                                // Relocations affect up to 8 bytes (pointers)
+                                                for (int off = 0; off < 8; off++) relocatedRVAs.insert(rva + off);
+                                            }
+                                        }
+                                        pReloc = (PIMAGE_BASE_RELOCATION)((PBYTE)pReloc + pReloc->SizeOfBlock);
+                                    }
+                                }
+
+                                for (WORD s = 0; s < pNt->FileHeader.NumberOfSections; s++) {
+                                    // Scan .text and executable sections
+                                    if (memcmp(pSec[s].Name, ".text", 5) == 0 || (pSec[s].Characteristics & IMAGE_SCN_CNT_CODE)) {
+                                        SIZE_T size = pSec[s].Misc.VirtualSize;
+                                        std::vector<BYTE> memBuffer(size);
+                                        
+                                        if (ReadProcessMemory(hProcess, (PBYTE)hMods[i] + pSec[s].VirtualAddress, memBuffer.data(), size, NULL)) {
+                                            PBYTE diskBuffer = (PBYTE)pMapped + pSec[s].VirtualAddress;
+                                            
+                                            for (SIZE_T b = 0; b < size; b++) {
+                                                SIZE_T currentRva = pSec[s].VirtualAddress + b;
+                                                
+                                                // Skip bytes modified legitimately by the OS loader (ASLR)
+                                                if (relocatedRVAs.find(currentRva) != relocatedRVAs.end()) continue;
+
+                                                if (memBuffer[b] != diskBuffer[b]) {
+                                                    // ANY non-relocation change is a guaranteed modification (Hook/Patch)
+                                                    std::string sModName(modNameStr.begin(), modNameStr.end());
+                                                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_HOOK_DETECTION, 
+                                                        "Deep Inline/Mid-function Hook detected: Unrelocated memory-disk byte mismatch", sModName, GetProcessId(hProcess));
+                                                    break; // Alert once per section to avoid flood
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                UnmapViewOfFile(pMapped);
+                            }
+                            CloseHandle(hMap);
+                        }
+                        CloseHandle(hFile);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Scan standalone unbacked anomalous memory pages for JMP/CALL stubs
     LPVOID address = 0;
     MEMORY_BASIC_INFORMATION mbi;
 
     while (VirtualQueryEx(hProcess, address, &mbi, sizeof(mbi))) {
-        // FIX: Include MEM_PRIVATE and Executable regions for reflective loading (Issue 26)
-        if (mbi.State == MEM_COMMIT && (mbi.Type == MEM_IMAGE || mbi.Type == MEM_PRIVATE)) {
+        if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE) {
             if (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_READ || mbi.Protect == PAGE_EXECUTE_WRITECOPY) {
-                // FIX: Scan larger chunk of the region (Issue 27)
                 const SIZE_T SCAN_SIZE = 4096;
                 BYTE sample[SCAN_SIZE];
                 SIZE_T toRead = min(SCAN_SIZE, mbi.RegionSize);
@@ -70,7 +209,7 @@ void MemoryScanner::ScanProcessHooks(HANDLE hProcess) {
                     }
 
                     if (hookFound) {
-                        Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_HOOK_DETECTION, "Inline hook detected in module: " + hookType, "Memory", GetProcessId(hProcess));
+                        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_MEMORY_ANOMALY, "Suspicious opcodes in unbacked memory region: " + hookType, "Memory", GetProcessId(hProcess));
                     }
                 }
             }
@@ -126,7 +265,6 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
 
         if ((mbi.Protect & PAGE_EXECUTE_READWRITE) || (mbi.Protect & PAGE_EXECUTE_WRITECOPY)) {
             if (mbi.State == MEM_COMMIT) {
-                // FIX: Remove goto, use continue properly (Issue 25)
                 if (isJit && mbi.RegionSize < 0x100000) {
                     addr = nextAddr;
                     if (addressOverflow) break;
@@ -136,6 +274,18 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
                 if (DetectNopSleds(hProcess, mbi.BaseAddress, mbi.RegionSize)) {
                     std::string sName(processName.begin(), processName.end());
                     Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_MEMORY_ANOMALY, "Shellcode NOP sled in RWX region", sName, pid);
+                }
+
+                // YARA Memory Scanning on Anonymous/Private Executable Pages
+                if (s_yaraRules && mbi.Type == MEM_PRIVATE) {
+                    SIZE_T toRead = min(mbi.RegionSize, (SIZE_T)(10 * 1024 * 1024)); // Cap at 10MB per region to prevent lockups
+                    std::vector<uint8_t> buffer(toRead);
+                    if (ReadProcessMemory(hProcess, mbi.BaseAddress, buffer.data(), toRead, NULL)) {
+                        yr_rules_scan_mem(
+                            s_yaraRules, buffer.data(), toRead, 
+                            0, YaraCallback, &pid, 0
+                        );
+                    }
                 }
             }
         }
@@ -158,10 +308,12 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
 }
 
 void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& processName) {
-    // FIX: Professional Process Hollowing Detection (Issue 10)
     // 1. Get ImageBaseAddress from PEB
-    PROCESS_BASIC_INFORMATION pbi;
-    if (NT_SUCCESS(NtQueryInformationProcess(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL))) {
+    PROCESS_BASIC_INFORMATION pbi = {0};
+    typedef NTSTATUS(NTAPI* pNtQueryInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+    pNtQueryInformationProcess NtQueryInformationProcess = (pNtQueryInformationProcess)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
+    
+    if (NtQueryInformationProcess && NT_SUCCESS(NtQueryInformationProcess(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL))) {
         PEB peb;
         if (ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) {
             LPVOID imageBase = peb.ImageBaseAddress;
@@ -173,6 +325,27 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
                     IMAGE_NT_HEADERS ntHeaders;
                     if (ReadProcessMemory(hProcess, (PBYTE)imageBase + dosHeader.e_lfanew, &ntHeaders, sizeof(ntHeaders), NULL)) {
                         if (ntHeaders.Signature == IMAGE_NT_SIGNATURE) {
+                            
+                            // Hollowing Detection: Inspect memory protection of the .text section
+                            SIZE_T sectionsOffset = (SIZE_T)imageBase + dosHeader.e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + ntHeaders.FileHeader.SizeOfOptionalHeader;
+                            std::vector<IMAGE_SECTION_HEADER> sections(ntHeaders.FileHeader.NumberOfSections);
+                            
+                            if (ReadProcessMemory(hProcess, (LPCVOID)sectionsOffset, sections.data(), sizeof(IMAGE_SECTION_HEADER) * ntHeaders.FileHeader.NumberOfSections, NULL)) {
+                                for (const auto& sec : sections) {
+                                    if (memcmp(sec.Name, ".text", 5) == 0 || (sec.Characteristics & IMAGE_SCN_MEM_EXECUTE)) {
+                                        MEMORY_BASIC_INFORMATION mbi;
+                                        if (VirtualQueryEx(hProcess, (PBYTE)imageBase + sec.VirtualAddress, &mbi, sizeof(mbi))) {
+                                            // Disk is PAGE_EXECUTE_READ. If memory is RWX or WriteCopy, payload was replaced.
+                                            if (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_WRITECOPY) {
+                                                std::string sName(processName.begin(), processName.end());
+                                                Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PROCESS_BEHAVIOR, 
+                                                    "Process Hollowing: .text section has modified RWX/WriteCopy permissions", sName, GetProcessId(hProcess));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             DWORD memoryTimeStamp = ntHeaders.FileHeader.TimeDateStamp;
                             
                             // 3. Read same PE file from disk and compare

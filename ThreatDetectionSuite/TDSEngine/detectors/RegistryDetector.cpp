@@ -89,7 +89,6 @@ void RegistryDetector::ScanAppInitDLLs() {
 bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
     if (path.empty()) return false;
 
-    // FIX: White list safe unsigned binaries to avoid false positives (Issue 33)
     std::wstring lowerPath = path;
     std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
     if (lowerPath.find(L"putty.exe") != std::wstring::npos || lowerPath.find(L"notepad++.exe") != std::wstring::npos) {
@@ -110,7 +109,6 @@ bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
     trustData.pSIPClientData = NULL;
     trustData.dwUIChoice = WTD_UI_NONE;
     
-    // FIX: Proper revocation checks (Issue 32)
     trustData.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN; 
     
     trustData.dwUnionChoice = WTD_CHOICE_FILE;
@@ -142,7 +140,6 @@ void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {
     DWORD index = 0;
     WCHAR valueName[256];
     
-    // FIX: Dynamic buffer for value data to handle large registry values (Issue 36)
     DWORD dataLen = 1024;
     std::vector<BYTE> valueData(dataLen);
     
@@ -166,7 +163,6 @@ void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {
                     path = path.substr(1, path.length() - 2);
                 }
 
-                // FIX: Expand environment variables for paths containing % (Issues 34, 35)
                 if (path.find(L"%") != std::wstring::npos) {
                     WCHAR expandedPath[MAX_PATH];
                     DWORD expLen = ExpandEnvironmentStringsW(path.c_str(), expandedPath, MAX_PATH);

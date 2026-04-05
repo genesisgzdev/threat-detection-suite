@@ -10,7 +10,7 @@
 #include <iomanip>
 #include <mutex>
 
-// Threat Detection Suite v4.2.0 Common Headers
+// Common Headers
 #include "../../ThreatDetectionSuite/TDSCommon/TDSCommon.h"
 #include "../../ThreatDetectionSuite/TDSScanner/MemoryScanner.h"
 #include "../../ThreatDetectionSuite/TDSEngine/detectors/RegistryDetector.h"
@@ -22,7 +22,7 @@
 
 #define TDS_DRIVER_DEVICE_NAME "\\\\.\\ThreatDetectionKernel"
 
-static std::atomic<bool> global_monitoring_active{true}; // FIX: Thread-safe monitoring flag (Issue 49)
+static std::atomic<bool> global_monitoring_active{true};
 
 class TDSBridge {
 public:
@@ -45,7 +45,7 @@ public:
             }
             return false;
         }
-        std::cout << "[+] Connected to Threat Detection Suite Kernel Driver v4.0" << std::endl;
+        std::cout << "[+] Connected to TDS Kernel Driver" << std::endl;
         return true;
     }
 
@@ -57,7 +57,7 @@ public:
     }
 
     void ProcessEvents() {
-        std::cout << "[*] Monitoring real-time system events via ThreatDetectionKernel..." << std::endl;
+        std::cout << "[*] Monitoring real-time system events..." << std::endl;
         
         BYTE buffer[MAX_EVENT_BUFFER_SIZE];
         DWORD bytesReturned;
@@ -119,7 +119,7 @@ private:
     }
 };
 
-BOOL RemediateFileQuarantineProfessional(LPCWSTR filePath) {
+BOOL RemediateFileQuarantine(LPCWSTR filePath) {
     WCHAR quarantinePath[MAX_PATH];
     swprintf_s(quarantinePath, L"%s.QUARANTINE", filePath);
 
@@ -134,7 +134,7 @@ BOOL RemediateFileQuarantineProfessional(LPCWSTR filePath) {
     return FALSE;
 }
 
-void RunLegacyUserlandScans() {
+void RunUserlandScans() {
     std::cout << "\n[*] Executing behavioral analysis..." << std::endl;
     
     TDS::MemoryScanner::ScanAllProcesses();
@@ -152,14 +152,25 @@ void RunLegacyUserlandScans() {
     std::cout << "[+] Behavioral verification phase completed." << std::endl;
 }
 
+BOOL WINAPI ConsoleCtrlHandler(DWORD signal) {
+    if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT) {
+        std::cout << "\n[!] Interruption signal received. Shutting down TDS Bridge safely to prevent Kernel IRP leaks..." << std::endl;
+        global_monitoring_active = false;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 int main(int argc, char* argv[]) {
-    std::cout << "Threat Detection Suite v4.2.0 - Integration Bridge" << std::endl;
-    std::cout << "---------------------------------------------------------" << std::endl;
+    std::cout << "TDS Integration Bridge" << std::endl;
+    std::cout << "----------------------" << std::endl;
+
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 
     TDSBridge bridge;
     bool connected = bridge.Connect();
 
-    RunLegacyUserlandScans();
+    RunUserlandScans();
 
     if (connected && argc > 1 && strcmp(argv[1], "--monitor") == 0) {
         bridge.ProcessEvents();

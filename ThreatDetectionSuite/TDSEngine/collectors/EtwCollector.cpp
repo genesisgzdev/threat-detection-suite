@@ -1,6 +1,7 @@
 #include "EtwCollector.h"
 #include <iostream>
 #include <system_error>
+#include <vector>
 #include <tdh.h>
 #pragma comment(lib, "tdh.lib")
 
@@ -73,6 +74,8 @@ bool EtwCollector::Start(const std::vector<EtwProvider>& providers) {
 
     m_hTrace = OpenTraceW(&logFile);
     if (m_hTrace == INVALID_PROCESSTRACE_HANDLE) {
+        // Prevent Kernel memory leak by stopping the orphaned session
+        ControlTraceW(m_hSession, m_sessionName.c_str(), pProperties, EVENT_TRACE_CONTROL_STOP);
         free(pProperties);
         Stop();
         return false;
@@ -130,8 +133,41 @@ void WINAPI EtwCollector::EventRecordCallback(PEVENT_RECORD pEvent) {
             if (pInfo) {
                 status = TdhGetEventInformation(pEvent, 0, nullptr, pInfo, &bufferSize);
                 if (status == ERROR_SUCCESS) {
-                    // Robust parsing skeleton: Properties can be read here via TdhFormatProperty
-                    // and pInfo->TopLevelPropertyCount. 
+                    for (ULONG i = 0; i < pInfo->TopLevelPropertyCount; i++) {
+                        std::wstring propName = (LPWSTR)((PBYTE)pInfo + pInfo->EventPropertyInfoArray[i].NameOffset);
+                        
+                        PROPERTY_DATA_DESCRIPTOR dataDesc;
+                        dataDesc.PropertyName = (ULONGLONG)((PBYTE)pInfo + pInfo->EventPropertyInfoArray[i].NameOffset);
+                        dataDesc.ArrayIndex = ULONG_MAX;
+                        
+                        DWORD propSize = 0;
+                        if (TdhGetPropertySize(pEvent, 0, nullptr, 1, &dataDesc, &propSize) == ERROR_SUCCESS && propSize > 0) {
+                            std::vector<BYTE> propData(propSize);
+                            if (TdhGetProperty(pEvent, 0, nullptr, 1, &dataDesc, propSize, propData.data()) == ERROR_SUCCESS) {
+                                PEVENT_PROPERTY_INFO propInfo = &pInfo->EventPropertyInfoArray[i];
+                                DWORD formattedSize = 0;
+                                USHORT userDataLen = (USHORT)propSize;
+                                
+                                status = TdhFormatProperty(
+                                    pInfo, NULL, 8, 
+                                    propInfo->nonStructType.InType, propInfo->nonStructType.OutType,
+                                    userDataLen, (USHORT)propSize, propData.data(), &formattedSize, NULL, &userDataLen
+                                );
+                                
+                                if (status == ERROR_INSUFFICIENT_BUFFER) {
+                                    std::vector<WCHAR> formattedData(formattedSize / sizeof(WCHAR));
+                                    status = TdhFormatProperty(
+                                        pInfo, NULL, 8, 
+                                        propInfo->nonStructType.InType, propInfo->nonStructType.OutType,
+                                        userDataLen, (USHORT)propSize, propData.data(), &formattedSize, formattedData.data(), &userDataLen
+                                    );
+                                    if (status == ERROR_SUCCESS) {
+                                        // Real telemetry extracted: property name and formatted value available here
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 free(pInfo);
             }

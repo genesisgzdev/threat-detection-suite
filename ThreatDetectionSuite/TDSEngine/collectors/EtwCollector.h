@@ -20,7 +20,6 @@ struct EtwProvider {
 
 class EtwCollector {
 public:
-    // FIX: Match the signature used in TDSService.cpp (Issue 41)
     EtwCollector(const std::wstring& sessionName);
     ~EtwCollector();
 

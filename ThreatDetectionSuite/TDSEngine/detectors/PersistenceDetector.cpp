@@ -25,7 +25,6 @@ void PersistenceDetector::ScanWmiSubscriptions() {
     hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\SUBSCRIPTION"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
     if (FAILED(hr)) return;
 
-    // FIX: Comprehensive WMI scanning covering Consumers and Bindings (Issue 37)
     const std::vector<std::wstring> classes = {
         L"__EventFilter",
         L"CommandLineEventConsumer",
@@ -92,7 +91,6 @@ void PersistenceDetector::ScanScheduledTasks() {
                                 LONG numActions = 0;
                                 pActions->get_Count(&numActions);
                                 
-                                // FIX: Process task actions to find LOLBins or suspicious paths (Issue 38)
                                 for (LONG j = 1; j <= numActions; j++) {
                                     ComPtr<IAction> pAction;
                                     if (SUCCEEDED(pActions->get_Item(j, &pAction))) {
@@ -140,7 +138,6 @@ void PersistenceDetector::ScanTempPersistence() {
     GetTempPathW(MAX_PATH, tempPath);
     ScanDirectory(tempPath);
 
-    // FIX: Comprehensive scanning including system temp and ProgramData (Issue 40)
     WCHAR sysTempPath[MAX_PATH];
     if (GetEnvironmentVariableW(L"SystemRoot", sysTempPath, MAX_PATH)) {
         std::wstring winTemp = std::wstring(sysTempPath) + L"\\Temp";
@@ -154,7 +151,6 @@ void PersistenceDetector::ScanTempPersistence() {
 }
 
 void PersistenceDetector::ScanDirectory(const std::wstring& directory, int depth) {
-    // FIX: Recursion limit to prevent stack overflow from deep hierarchies or symlinks (Issue 39)
     if (depth > 8) return; 
 
     std::wstring searchPath = directory + L"\\*.*";
