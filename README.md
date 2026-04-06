@@ -8,14 +8,14 @@ The core utilizes an Inverted Call Model to provide asynchronous telemetry from 
 
 ```mermaid
 graph TD
-    subgraph K_SPACE [Kernel Space]
+    subgraph K_Space [Kernel Space]
         A[Minifilter: File IO] --> E[Event Dispatcher]
         B[WFP: Network Flow] --> E
         C[ObCallbacks: Process Protection] --> E
         D[Registry Callbacks] --> E
         E --> F[Pending IRP Queue]
     end
-    subgraph U_SPACE [User Space]
+    subgraph U_Space [User Space]
         G[TDSService.exe] -->|IOCTL_GET_EVENT| F
         G --> H[Sequence Correlator]
         H --> I[Incident Reporting]
@@ -52,4 +52,4 @@ sc start TDSDriver
 ```
 
 ## Notice
-Developed for security research and audit purposes. Finalized April 6, 2026.
+Developed by The Developer for security research and audit purposes. Finalized April 6, 2026.
