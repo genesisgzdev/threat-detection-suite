@@ -2,7 +2,7 @@
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
 LABEL maintainer="security@genzt.dev"
-LABEL version="4.2.0"
+LABEL version="5.0.0"
 
 WORKDIR /app
 COPY . .

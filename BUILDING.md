@@ -1,4 +1,4 @@
-﻿# BUILDING: Threat Detection Suite v4.2.0
+﻿# BUILDING: Threat Detection Suite v5.0.0
 
 This guide provides instructions for building the Threat Detection Suite suite from source. The project uses a modular build process involving CMake for user-mode components and the Windows Driver Kit (WDK) for the kernel-mode driver.
 

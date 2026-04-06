@@ -1,7 +1,7 @@
 ﻿@echo off
 setlocal enabledelayedexpansion
 
-echo [*] Starting Threat Detection Suite v4.2.0 Build Process
+echo [*] Starting Threat Detection Suite v5.0.0 Build Process
 echo [!] Ensuring professional engineering environment...
 
 :: 1. Check for CMake
