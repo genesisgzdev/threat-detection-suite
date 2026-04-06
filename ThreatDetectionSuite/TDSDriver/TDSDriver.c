@@ -122,7 +122,7 @@ void DispatchPendingEvents() {
             break;
         }
 
-        // Industrial Safety: Clear cancel routine BEFORE removing from list
+        // native Safety: Clear cancel routine BEFORE removing from list
         PLIST_ENTRY irpEntry = g_PendingIrpList.Flink;
         PTDS_PENDING_IRP pIrp = CONTAINING_RECORD(irpEntry, TDS_PENDING_IRP, ListEntry);
         PIRP Irp = pIrp->Irp;
