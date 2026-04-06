@@ -1,30 +1,24 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to the Threat Detection Suite (TDS) project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-04-05
+## [0.1.0] - 2025-05-20
 
 ### Added
-- Advanced Kernel Driver with support for Process, Thread, and Image Load notifications.
-- Windows Filtering Platform (WFP) callouts for real-time network telemetry.
-- Minifilter driver for file system operation monitoring.
-- Behavioral Correlation Engine in user-mode for complex attack pattern detection.
-- Automated Process Memory Dumping for forensic evidence collection.
-- Support for Event Tracing for Windows (ETW) threat intelligence providers.
-- Local pre-commit security shield with Snyk auditing.
-- Industrial GitHub Actions CI/CD pipeline.
-
-### Fixed
-- Hardened LSASS protection using strict path and device prefix validation.
-- Resolved kernel spinlock deadlocks and IRP cancellation race conditions.
-- Fixed memory alignment UB by moving atomics outside packed structures.
-- Optimized event queue management to prevent kernel pool exhaustion.
+- **100% Event-Driven Core**: Replaced all legacy polling logic with native kernel callbacks.
+- **Kernel Interception Engine**: 
+  - Implementation of `PsSetCreateProcessNotifyRoutineEx` for deep process lineage tracking.
+  - Windows Filtering Platform (WFP) Callouts for L3/L4 network interception.
+  - File System Minifilter for pre-operation I/O monitoring and ransomware mitigation.
+- **ETW-Ti Support**: Integrated Event Tracing for Windows - Threat Intelligence for advanced telemetry (injection detection, memory allocation).
+- **Self-Protection Core**: Implemented `ObRegisterCallbacks` to shield EDR processes from termination and memory manipulation.
+- **IPC Layer**: High-performance "Inverted Call" model for low-latency kernel-to-user communication.
+- **Forensic Pipeline**: Automated JSONL event generation and GTI (Google Threat Intelligence) enrichment bridge.
 
 ### Security
-- Implemented `ObRegisterCallbacks` for EDR self-protection.
-- Added detection for Early Bird APC injection and Process Hollowing.
-- Obfuscated sensitive kernel strings and randomized filter altitudes.
-- Added comprehensive `SECURITY.md` and `DISCLAIMER.md`.
+- Hardened driver altitudes and randomized device object names.
+- Mandatory Snyk SAST and OSV-Scanner checks in CI/CD.
+- Responsible disclosure policy ([SECURITY.md](SECURITY.md)) and ethical use guidelines ([DISCLAIMER.md](DISCLAIMER.md)).

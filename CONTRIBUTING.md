@@ -1,25 +1,37 @@
-# Contributing to Threat Detection Suite
+# Contributing to Threat Detection Suite (TDS)
 
-We welcome security researchers and developers to contribute to the suite.
+We welcome technical contributions that push the boundaries of event-driven security.
 
-## 🚀 How to Contribute
+## 🛠 Engineering Standards
 
-### 1. Research & Bug Reports
-- Use the GitHub Issue tracker for feature requests or functional bugs.
-- For security vulnerabilities, follow [SECURITY.md](SECURITY.md).
+### Languages & Dialects
+-   **User-Mode Engine**: Strictly **C++17**. We leverage modern RAII, filesystem, and template metaprogramming.
+-   **Kernel-Mode Core**: Strictly **C11** (MSVC/WDK compatible). No GNU extensions that break cross-compiler compatibility for driver development.
 
-### 2. Pull Requests
-- Fork the repository and create your branch from `main`.
-- **Testing**: Any kernel changes MUST be tested in a dedicated VM. Ensure no BSOD occurs during common operations.
-- **Coding Standard**: Adhere to C++17 for user-mode and C11 for kernel-mode logic.
-- **Security Scans**: Run a local Snyk scan before submitting:
-  ```bash
-  snyk code test
-  ```
+### 🚫 The "Zero Polling" Mandate
+TDS is a 100% **Event-Driven** framework. Any contribution that introduces polling (e.g., `while(true) { sleep(100); check_status(); }`) will be **rejected automatically**. 
+- Use **Kernel Callbacks** (`PsSetCreateProcessNotifyRoutineEx`, `ObRegisterCallbacks`).
+- Use **WFP Callouts** for network.
+- Use **Minifilter** for I/O.
+- Use **ETW-Ti** for advanced threat intelligence telemetry.
 
-## 📜 Development Guidelines
-- **Event-Driven Only**: Polling is strictly forbidden. All detections must be based on callbacks (Kernel) or ETW (Userland).
-- **Resource Management**: Strictly manage kernel pools and ensure no leaks using tools like Driver Verifier.
+## 🚀 Contribution Workflow
+
+1.  **Architecture Alignment**: Before writing complex code, open a "Design Proposal" issue to discuss the implementation strategy.
+2.  **VM Testing**: All kernel-mode changes MUST be verified using **Driver Verifier** and tested in a VM against various Windows 10/11 builds.
+3.  **Security Audit**: Run local Snyk and OSV-Scanner checks:
+    ```bash
+    # Check for vulnerable dependencies
+    osv-scanner --recursive .
+    # Perform static analysis
+    snyk code test
+    ```
+4.  **Pull Request**: Provide a detailed description of the changes and the evidence of successful testing (logs/dumps).
+
+## 🖋 Style Guide
+- Use **PascalCase** for Classes/Structs and **camelCase** for members/functions.
+- Prefer `std::unique_ptr` and `std::shared_ptr` in user-mode; manual memory management in kernel-mode must be handled with strict `ExAllocatePool2` / `ExFreePool` cycles.
+- All sensitive strings must be encrypted/obfuscated at compile time.
 
 ## ⚖️ License
-By contributing to TDS, you agree that your contributions will be licensed under its [Apache License 2.0](LICENSE).
+By contributing to TDS, you agree that your code will be released under the [Apache License 2.0](LICENSE).

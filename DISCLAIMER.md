@@ -1,17 +1,28 @@
-# Disclaimer
+# Legal Disclaimer & Ethical Use Guidelines
 
-**IMPORTANT: READ CAREFULLY**
+**ATTENTION: BY USING THE THREAT DETECTION SUITE (TDS), YOU AGREE TO BE BOUND BY THE FOLLOWING TERMS.**
 
-The Threat Detection Suite (TDS) is designed for educational, research, and defensive security purposes only. 
+## ⚖️ Legal Status
+TDS is a low-level security framework that includes kernel-mode components. Its use is governed by local and international laws regarding cybersecurity and computer misuse. 
 
-## ⚖️ Legal & Ethical Use
-- This tool should only be deployed on systems where you have explicit, written authorization from the owner.
-- Unauthorized use of this software against systems you do not own or have permission to test may violate local, state, federal, or international laws.
-- The maintainers of this project are not responsible for any misuse, damage, or legal consequences resulting from the use of this software.
+### 🛡️ Defensive & Research Intent
+- This software is designed exclusively for **defensive engineering, academic research, and internal security monitoring**.
+- Use of this tool for offensive operations, unauthorized surveillance, or any malicious activity is strictly prohibited and contrary to the project's mission.
 
-## ⚠️ Stability & Risks
-- TDS includes a kernel-mode driver. Improper configuration or use in unstable environments may cause system crashes (Blue Screen of Death - BSOD) or data loss.
-- Always test in isolated lab environments (e.g., dedicated VMs) before any production or research deployment.
+### 🚫 Authorization Required
+- You MUST have explicit, written authorization from the owner of any system where TDS is deployed.
+- Deployment on systems without authorization may constitute a criminal offense.
 
-## 🛡️ Intent
-The primary intent of this project is to advance the state of defensive engineering and security research by providing a transparent, event-driven detection architecture. 
+## ⚠️ Risk & Liability
+### System Instability
+- Kernel-mode drivers operate at the highest privilege level. Errors in configuration or environment compatibility may result in **Blue Screen of Death (BSOD)**, data corruption, or permanent system failure.
+- The authors and maintainers provide NO warranty and assume NO liability for damages resulting from the use or misuse of this software.
+
+### Data Privacy
+- TDS intercepts deep system telemetry (Process IDs, IPs, File paths). It is the user's responsibility to ensure that such data collection complies with privacy regulations (e.g., GDPR, CCPA).
+
+## 🧪 Best Practices
+- **Isolation First**: Never test new versions of TDS on production machines. Use isolated laboratory environments and dedicated Virtual Machines (VMs).
+- **Code Audit**: Users are encouraged to audit the source code before deployment to ensure alignment with their security requirements.
+
+*Empowering defenders through transparent engineering.*

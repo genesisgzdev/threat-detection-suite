@@ -1,79 +1,71 @@
 # Threat Detection Suite (TDS)
-> **Advanced Event-Driven Endpoint Detection and Response (EDR) for Windows**
+> **High-Performance, 100% Event-Driven EDR Core for Windows**
 
-[![Security Status](https://img.shields.io/badge/Security-Snyk%20Certified-blueviolet?style=for-the-badge&logo=snyk)](https://github.com/genesisgzdev/threat-detection-suite/security/code-scanning)
-[![Kernel Mode](https://img.shields.io/badge/Kernel-WDM%20%7C%20WDF-blue?style=for-the-badge)](https://docs.microsoft.com/en-us/windows-hardware/drivers/kernel/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-red?style=for-the-badge)](LICENSE)
-[![CI Status](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml/badge.svg)](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml)
+[![Kernel Architecture](https://img.shields.io/badge/Architecture-100%25%20Event--Driven-green?style=for-the-badge)](CONTRIBUTING.md)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=for-the-badge)](LICENSE)
+[![Security](https://img.shields.io/badge/Security-Hardened-red?style=for-the-badge)](SECURITY.md)
 
----
-
-## 🎯 Project Overview
-Threat Detection Suite (TDS) is a high-performance, event-driven security ecosystem designed for deep system visibility and automated threat remediation. Unlike basic monitoring tools that rely on expensive polling (e.g., `psutil` or WMI queries), TDS utilizes **native Windows kernel callbacks** and **ETW (Event Tracing for Windows)** to provide real-time, low-overhead telemetry.
+TDS is an industrial-grade security framework designed to provide deep system visibility and automated threat remediation without the overhead of legacy polling mechanisms. By operating at the kernel level, TDS captures system events at their source, ensuring zero-latency telemetry and tamper-resistant monitoring.
 
 ---
 
-## 🏗 Key Architectural Pillars
+## 🏗 Deep Technical Architecture
 
-### 1. TDS Kernel Engine (`TDSDriver.sys`)
-The heart of the suite is a robust WDM driver that intercepts system activity at the lowest level:
-- **Process/Thread Monitoring**: Uses `PsSetCreateProcessNotifyRoutineEx` and `PsSetCreateThreadNotifyRoutine` to capture execution lineage and detect remote thread injection.
-- **Network Interception (WFP)**: Implements Windows Filtering Platform callouts to monitor IPv4/v6 and UDP/DNS traffic, identifying C2 beaconing and exfiltration.
-- **File System Guard (Minifilter)**: Intercepts IRPs via a Filter Manager callback to detect ransomware-like behavior (mass renaming/deletion).
-- **Self-Protection**: Leverages `ObRegisterCallbacks` to strip dangerous handle rights (`PROCESS_TERMINATE`, `PROCESS_VM_WRITE`) from unauthorized processes targeting the EDR.
+### 1. Zero-Polling Kernel Engine
+Unlike traditional security tools that query process lists or file states every few seconds (polling), TDS is built on a **Push-Based Architecture**. It remains dormant until the Windows kernel triggers a registered callback, ensuring minimal CPU impact and eliminating the "blind spots" inherent in polling.
 
-### 2. Behavioral Correlation Engine
-A stateful user-mode service that aggregates kernel telemetry to identify complex attack chains:
-- **Early Bird Detection**: Correlates process creation in a suspended state with subsequent APC queuing.
-- **Process Hollowing**: Cross-references memory `TimeDateStamp` with disk images and identifies anomalous RWX sections in `.text`.
-- **DKOM Exposure**: Identifies hidden rootkit processes by cross-checking `NtQuerySystemInformation` against Win32 snapshots.
+### 2. Network Interception (WFP Callouts)
+TDS implements **Windows Filtering Platform (WFP)** callout drivers to intercept network traffic at the L3/L4 layers.
+- **Deep Packet Inspection (DPI)**: Monitors IPv4/v6, TCP, and UDP traffic in real-time.
+- **C2 Mitigation**: Identifies and blocks unauthorized beaconing by analyzing flow patterns before packets leave the network stack.
+- **DNS Monitoring**: Intercepts `FWPM_LAYER_DATAGRAM_DATA_V4` to detect DGA (Domain Generation Algorithm) activity.
 
-### 3. Automated Forensics (`ForensicManager`)
-Upon detection of a **CRITICAL** threat, TDS automatically:
-- Triggers a full process memory dump using `MiniDumpWriteDump` for offline analysis.
-- Enriches IoCs (hashes/IPs) using the **Google Threat Intelligence (GTI)** bridge.
-- Logs structured **JSONL** events ready for SIEM ingestion (Chronicle/Splunk).
+### 3. File System Guard (Minifilter)
+The file system protection layer uses a **Filter Manager** minifilter driver.
+- **Pre-Operation Interception**: Intercepts `IRP_MJ_WRITE`, `IRP_MJ_SET_INFORMATION`, and `IRP_MJ_CREATE` requests.
+- **Ransomware Protection**: Detects rapid, multi-file encryption patterns and halts the responsible process before significant data loss occurs.
+- **Altitudes**: Operates at high-priority altitudes to ensure interception before malicious filter drivers.
 
----
-
-## 🛠 Technical Specifications
-- **Languages**: C11 (Kernel), C++17 (User-mode).
-- **Inter-Process Communication**: Secured **Inverted Call Model** via pending IRPs and METHOD_BUFFERED IOCTLs.
-- **Binary Security**: Compiled with `/GS`, `/guard:cf`, and `/DYNAMICBASE`; all sensitive kernel strings are obfuscated.
-- **CI/CD**: Fully automated pipeline with **Snyk SAST** and **OSV-Scanner**.
+### 4. Advanced Telemetry (ETW-Ti)
+TDS leverages the **Event Tracing for Windows - Threat Intelligence (ETW-Ti)** provider to detect sophisticated in-memory attacks that standard callbacks might miss:
+- **Injection Detection**: Monitors `KiSystemCall64` and memory allocation patterns to identify `VirtualAllocEx` / `WriteProcessMemory` chains used in Process Hollowing.
+- **Token Manipulation**: Tracks security token changes to detect Privilege Escalation.
+- **Module Loads**: Real-time tracking of DLL loads to identify sideloading and proxying.
 
 ---
 
-## 🚦 Getting Started
+## 🛡️ Core Security Features
+- **Inverted Call Model**: A robust IPC mechanism where the user-mode engine waits on pending IRPs from the kernel, enabling the driver to "push" data to user-mode with zero delay.
+- **Self-Protection (ObRegisterCallbacks)**: TDS protects its own process and service by stripping `PROCESS_TERMINATE` and `PROCESS_VM_WRITE` rights from any external process handle.
+- **Forensic Pipeline**: Every detection triggers an automated forensic sequence, generating structured **JSONL** events enriched with **Google Threat Intelligence** data.
 
-### Prerequisites
-- Windows 10/11 (x64).
-- Visual Studio 2022+ with **WDK (Windows Driver Kit)**.
-- Test Signing mode enabled (`bcdedit /set testsigning on`).
+---
 
-### Installation
+## 🚀 Deployment & Engineering
+
+### Technical Stack
+- **User-Mode**: C++17 (RAII, Modern STL).
+- **Kernel-Mode**: C11 (WDK, KMDF).
+- **Build System**: CMake with custom WDK integration.
+
+### Getting Started
 ```powershell
-# Build the user-mode service
+# Prerequisites: Windows 10/11 x64, Visual Studio 2022, WDK.
+# 1. Enable Test Signing
+bcdedit /set testsigning on
+
+# 2. Build the Suite
 cmake -B build
 cmake --build build --config Release
 
-# Install the driver (Requires Admin)
-sc create TDSDriver type= kernel binPath= C:\path\to\TDSDriver.sys
+# 3. Load the Engine
+sc create TDSDriver type= kernel binPath= C:\bin\TDSDriver.sys
 sc start TDSDriver
 ```
 
 ---
 
-## 🗺 Roadmap
-- [ ] Implement ELAM (Early Launch Anti-Malware) support.
-- [ ] Add Kernel-mode stack walking for advanced ROP detection.
-- [ ] Integration with Microsoft Threat Intelligence (MSTI) feeds.
-- [ ] Real-time Registry Hive rollback.
+## 📜 Legal & Ethical Notice
+This project is for **defensive security research and educational use only**. Unauthorized use against systems you do not own is strictly prohibited. See [DISCLAIMER.md](DISCLAIMER.md) for full terms.
 
----
-
-## 📜 Legal Notice
-This tool is for **defensive research and educational purposes only**. See [DISCLAIMER.md](DISCLAIMER.md) for full terms. All contributions are subject to the [Apache License 2.0](LICENSE).
-
----
-*Technical integrity is not a feature; it's a foundation. Zero polling. Zero simulations.*
+*Defending the kernel, one callback at a time.*

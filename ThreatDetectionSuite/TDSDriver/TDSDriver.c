@@ -253,25 +253,32 @@ BOOLEAN IsEdrProcess(PEPROCESS Process) {
 
 OB_PRE_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
     UNREFERENCED_PARAMETER(RegistrationContext);
-    ULONG targetPid = 0;
+    
     PEPROCESS targetProcess = NULL;
+    ULONG targetPid = 0;
 
     if (OperationInformation->ObjectType == *PsProcessType) {
         targetProcess = (PEPROCESS)OperationInformation->Object;
-        targetPid = HandleToUlong(PsGetProcessId(targetProcess));
     } else if (OperationInformation->ObjectType == *PsThreadType) {
         targetProcess = IoThreadToProcess((PETHREAD)OperationInformation->Object);
-        targetPid = HandleToUlong(PsGetProcessId(targetProcess));
+    } else {
+        return OB_PREOP_SUCCESS;
     }
 
-    // Self-Protection: Protect EDR process and threads by PID or by Name
-    if ((g_EdrPid != 0 && targetPid == g_EdrPid) || (targetProcess && IsEdrProcess(targetProcess))) {
+    if (!targetProcess) return OB_PREOP_SUCCESS;
+    targetPid = HandleToUlong(PsGetProcessId(targetProcess));
+
+    // Self-Protection: Protect EDR process and its threads
+    if ((g_EdrPid != 0 && targetPid == g_EdrPid) || IsEdrProcess(targetProcess)) {
         ACCESS_MASK forbidden;
         if (OperationInformation->ObjectType == *PsProcessType) {
             forbidden = (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | 
-                         PROCESS_CREATE_THREAD | PROCESS_SET_INFORMATION | PROCESS_DUP_HANDLE);
+                         PROCESS_CREATE_THREAD | PROCESS_SET_INFORMATION | PROCESS_DUP_HANDLE |
+                         PROCESS_VM_OPERATION);
         } else {
-            forbidden = (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT | THREAD_DIRECT_IMPERSONATION);
+            // Refined thread protection as requested: block THREAD_SET_CONTEXT and THREAD_TERMINATE
+            forbidden = (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT | 
+                         THREAD_SET_INFORMATION | THREAD_DIRECT_IMPERSONATION);
         }
 
         if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) {
@@ -282,7 +289,7 @@ OB_PRE_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATI
     }
 
     // Protection for LSASS (Mandatory for EDR)
-    if (OperationInformation->ObjectType == *PsProcessType && IsLsass((PEPROCESS)OperationInformation->Object)) {
+    if (OperationInformation->ObjectType == *PsProcessType && IsLsass(targetProcess)) {
         ACCESS_MASK forbidden = (PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | PROCESS_TERMINATE);
         if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) {
             OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
@@ -326,27 +333,71 @@ FLT_POSTOP_CALLBACK_STATUS TDSPostCreateCallback(_Inout_ PFLT_CALLBACK_DATA Data
 }
 
 FLT_PREOP_CALLBACK_STATUS TDSPreSetInformationCallback(_Inout_ PFLT_CALLBACK_DATA Data, _In_ PCFLT_RELATED_OBJECTS FltObjects, _Outptr_opt_ PVOID *CompletionContext) {
+    UNREFERENCED_PARAMETER(FltObjects);
+    UNREFERENCED_PARAMETER(CompletionContext);
+
+    if (Data->RequestorMode == KernelMode) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
     FILE_INFORMATION_CLASS infoClass = Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
-    if (infoClass == FileRenameInformation || infoClass == FileRenameInformationEx || infoClass == FileDispositionInformation || infoClass == FileDispositionInformationEx) {
-        PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
-        if (NT_SUCCESS(FltGetFileNameInformation(Data, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT, &nameInfo))) {
-            FltParseFileNameInformation(nameInfo); ULONG pathLen = nameInfo->Name.Length;
-            ULONG targetLen = (infoClass == FileRenameInformation || infoClass == FileRenameInformationEx) ? ((PFILE_RENAME_INFORMATION)Data->Iopb->Parameters.SetFileInformation.InfoBuffer)->FileNameLength : 0;
-            ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen + targetLen;
-            PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
-            if (item) {
-                RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
-                PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1); header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); header->DataSize = dataSize;
-                KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp); PTDS_FILE_EVENT_DATA fData = (PTDS_FILE_EVENT_DATA)(header + 1);
-                fData->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA); RtlCopyMemory((PUCHAR)header + fData->FilePathOffset, nameInfo->Name.Buffer, pathLen);
-                if (infoClass == FileRenameInformation || infoClass == FileRenameInformationEx) {
-                    header->Type = TDSEventFileOp; fData->Operation = 3; fData->TargetPathOffset = fData->FilePathOffset + pathLen;
-                    RtlCopyMemory((PUCHAR)header + fData->TargetPathOffset, ((PFILE_RENAME_INFORMATION)Data->Iopb->Parameters.SetFileInformation.InfoBuffer)->FileName, targetLen);
-                } else { header->Type = TDSEventFileDelete; fData->Operation = 2; }
-                QueueTDSEvent(item);
-            }
-            FltReleaseFileNameInformation(nameInfo);
+    BOOLEAN isDelete = FALSE;
+    BOOLEAN isRename = FALSE;
+    ULONG targetLen = 0;
+    PVOID targetBuffer = NULL;
+
+    if (infoClass == FileDispositionInformation) {
+        PFILE_DISPOSITION_INFORMATION dispInfo = (PFILE_DISPOSITION_INFORMATION)Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+        if (dispInfo && dispInfo->DeleteFile) isDelete = TRUE;
+    } else if (infoClass == FileDispositionInformationEx) {
+        PFILE_DISPOSITION_INFORMATION_EX dispInfoEx = (PFILE_DISPOSITION_INFORMATION_EX)Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+        if (dispInfoEx && (dispInfoEx->Flags & FILE_DISPOSITION_DELETE)) isDelete = TRUE;
+    } else if (infoClass == FileRenameInformation) {
+        PFILE_RENAME_INFORMATION renameInfo = (PFILE_RENAME_INFORMATION)Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+        if (renameInfo) {
+            isRename = TRUE;
+            targetLen = renameInfo->FileNameLength;
+            targetBuffer = renameInfo->FileName;
         }
+    } else if (infoClass == FileRenameInformationEx) {
+        PFILE_RENAME_INFORMATION_EX renameInfoEx = (PFILE_RENAME_INFORMATION_EX)Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+        if (renameInfoEx) {
+            isRename = TRUE;
+            targetLen = renameInfoEx->FileNameLength;
+            targetBuffer = renameInfoEx->FileName;
+        }
+    }
+
+    if (!isDelete && !isRename) return FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
+    if (NT_SUCCESS(FltGetFileNameInformation(Data, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT, &nameInfo))) {
+        FltParseFileNameInformation(nameInfo);
+        ULONG pathLen = nameInfo->Name.Length;
+        ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen + targetLen;
+        
+        PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
+        if (item) {
+            RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
+            PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+            header->Type = isDelete ? TDSEventFileDelete : TDSEventFileOp;
+            header->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+            header->ThreadId = HandleToUlong(PsGetCurrentThreadId());
+            header->DataSize = dataSize;
+            KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
+
+            PTDS_FILE_EVENT_DATA fData = (PTDS_FILE_EVENT_DATA)(header + 1);
+            fData->Operation = isDelete ? 2 : 3;
+            fData->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA);
+            RtlCopyMemory((PUCHAR)header + fData->FilePathOffset, nameInfo->Name.Buffer, pathLen);
+
+            if (isRename && targetBuffer && targetLen > 0) {
+                fData->TargetPathOffset = fData->FilePathOffset + pathLen;
+                RtlCopyMemory((PUCHAR)header + fData->TargetPathOffset, targetBuffer, targetLen);
+            }
+            QueueTDSEvent(item);
+        }
+        FltReleaseFileNameInformation(nameInfo);
     }
     return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
