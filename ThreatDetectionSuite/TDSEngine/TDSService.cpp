@@ -10,7 +10,7 @@
 #include "collectors/EtwCollector.h"
 
 //
-// Threat Detection Suite v4.7.0 - Native Windows Service
+// Threat Detection Suite v4.10.0 - Native Windows Service
 // Cloud Integration & Advanced Kernel Watchdog
 //
 
