@@ -1,57 +1,79 @@
-# Threat Detection Suite v4.2.0
+# Threat Detection Suite (TDS)
+> **Advanced Event-Driven Endpoint Detection and Response (EDR) for Windows**
 
-Threat Detection Suite (Endpoint Detection and Response) is a professional-grade security suite designed for deep system visibility, real-time threat detection, and automated incident response on Windows platforms. Version 4.2.0 introduces a hardened Kernel Driver + Userland Service architecture, leveraging advanced Event Tracing for Windows (ETW), Windows Filtering Platform (WFP), and a multi-stage behavioral correlation engine.
+[![Security Status](https://img.shields.io/badge/Security-Snyk%20Certified-blueviolet?style=for-the-badge&logo=snyk)](https://app.snyk.io/org/genesisgzdev)
+[![Kernel Mode](https://img.shields.io/badge/Kernel-WDM%20%7C%20WDF-blue?style=for-the-badge)](https://docs.microsoft.com/en-us/windows-hardware/drivers/kernel/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-red?style=for-the-badge)](LICENSE)
+[![CI Status](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml/badge.svg)](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml)
 
-## Key Architectural Components
+---
 
-### 1. ThreatDetectionKernel (Kernel-Mode Driver)
-A high-performance Windows kernel-mode driver (WDM/WDF) that provides:
-- **Process and Thread Notifications:** Real-time monitoring of process creation and thread injection via `PsSetCreateProcessNotifyRoutineEx` and `PsSetCreateThreadNotifyRoutine`.
-- **WFP Callouts:** Monitoring and analyzing network connections at the kernel level for beaconing detection.
-- **Inverted Call Model:** High-performance asynchronous event delivery to user-mode via pending IRPs.
-- **Image Load Notifications:** Detection of DLL injection and reflective loading via `PsSetLoadImageNotifyRoutine`.
-- **Self-Protection:** Object callback protection for the EDR service process and critical system entities like LSASS.
+## 🎯 Project Overview
+Threat Detection Suite (TDS) is a high-performance, event-driven security ecosystem designed for deep system visibility and automated threat remediation. Unlike basic monitoring tools that rely on expensive polling (e.g., `psutil` or WMI queries), TDS utilizes **native Windows kernel callbacks** and **ETW (Event Tracing for Windows)** to provide real-time, low-overhead telemetry.
 
-> **Note:** The driver is currently in active development. Ensure the Windows Driver Kit (WDK) is installed for compilation.
+---
 
-### 2. ThreatDetectionService (User-Mode Service)
-A persistent Windows service acting as the central intelligence hub:
-- **ETW Orchestration:** Consumes and analyzes Event Tracing for Windows (ETW) streams for DNS queries, file operations, and TI events.
-- **Behavioral Correlation Engine:** Correlates disparate system events to identify complex attack patterns using stateful tracking.
-- **Policy Enforcement:** Communicates with the kernel driver via secure IOCTLs to enforce detection rules and automated remediation actions.
+## 🏗 Key Architectural Pillars
 
-### 3. TDSEngine (Detection & Analytics)
-A modular engine implementing:
-- **Heuristic Pattern Matching:** Signature-less detection of known exploitation techniques (e.g., LOLBins, Process Hollowing).
-- **Memory Forensic Analysis:** Multi-offset sampling of process memory for shellcode, RWX pages, and hidden hooks.
-- **Network Traffic Correlation:** Identifying C2 communication patterns and data exfiltration attempts via statistical analysis.
+### 1. TDS Kernel Engine (`TDSDriver.sys`)
+The heart of the suite is a robust WDM driver that intercepts system activity at the lowest level:
+- **Process/Thread Monitoring**: Uses `PsSetCreateProcessNotifyRoutineEx` and `PsSetCreateThreadNotifyRoutine` to capture execution lineage and detect remote thread injection.
+- **Network Interception (WFP)**: Implements Windows Filtering Platform callouts to monitor IPv4/v6 and UDP/DNS traffic, identifying C2 beaconing and exfiltration.
+- **File System Guard (Minifilter)**: Intercepts IRPs via a Filter Manager callback to detect ransomware-like behavior (mass renaming/deletion).
+- **Self-Protection**: Leverages `ObRegisterCallbacks` to strip dangerous handle rights (`PROCESS_TERMINATE`, `PROCESS_VM_WRITE`) from unauthorized processes targeting the EDR.
 
-## Forensic Capabilities
-- **Event Journaling:** High-fidelity logging of system events with resource exhaustion mitigation.
-- **Process Lineage Tracking:** Full visibility into parent-child process relationships and execution chains.
-- **Automated Remediation:** Real-time process termination, registry cleanup, and secure file quarantine with reboot-persistent fallback.
+### 2. Behavioral Correlation Engine
+A stateful user-mode service that aggregates kernel telemetry to identify complex attack chains:
+- **Early Bird Detection**: Correlates process creation in a suspended state with subsequent APC queuing.
+- **Process Hollowing**: Cross-references memory `TimeDateStamp` with disk images and identifies anomalous RWX sections in `.text`.
+- **DKOM Exposure**: Identifies hidden rootkit processes by cross-checking `NtQuerySystemInformation` against Win32 snapshots.
 
-## Technical Specifications
-- **Core Standards:** C++17 (User-mode), C11 (Kernel-mode).
-- **Minimum OS:** Windows 10 (Build 1809+) / Windows Server 2019.
-- **Build System:** CMake + WDK (Windows Driver Kit).
-- **Communication:** Secure IOCTL channel with caller authentication.
+### 3. Automated Forensics (`ForensicManager`)
+Upon detection of a **CRITICAL** threat, TDS automatically:
+- Triggers a full process memory dump using `MiniDumpWriteDump` for offline analysis.
+- Enriches IoCs (hashes/IPs) using the **Google Threat Intelligence (GTI)** bridge.
+- Logs structured **JSONL** events ready for SIEM ingestion (Chronicle/Splunk).
 
-## Project Structure
-```text
-.
-├── ThreatDetectionSuite/
-│   ├── TDSCommon/      # Shared headers and packed IPC structures
-│   ├── TDSDriver/      # Kernel-mode driver source (WDK/C11)
-│   ├── TDSEngine/      # Behavioral correlation and detection logic
-│   │   ├── collectors/ # ETW and Telemetry collectors
-│   │   ├── correlator/ # Stateful event correlation
-│   │   └── detectors/  # Specialized detection modules (Persistence, Registry, Net)
-│   └── TDSScanner/     # Memory, Hook, and Entropy forensic scanners
-├── tools/
-│   └── bridge/         # Integration Bridge & Test Utility
-└── tests/              # Integration and unit tests
+---
+
+## 🛠 Technical Specifications
+- **Languages**: C11 (Kernel), C++17 (User-mode).
+- **Inter-Process Communication**: Secured **Inverted Call Model** via pending IRPs and METHOD_BUFFERED IOCTLs.
+- **Binary Security**: Compiled with `/GS`, `/guard:cf`, and `/DYNAMICBASE`; all sensitive kernel strings are obfuscated.
+- **CI/CD**: Fully automated pipeline with **Snyk SAST** and **OSV-Scanner**.
+
+---
+
+## 🚦 Getting Started
+
+### Prerequisites
+- Windows 10/11 (x64).
+- Visual Studio 2022+ with **WDK (Windows Driver Kit)**.
+- Test Signing mode enabled (`bcdedit /set testsigning on`).
+
+### Installation
+```powershell
+# Build the user-mode service
+cmake -B build
+cmake --build build --config Release
+
+# Install the driver (Requires Admin)
+sc create TDSDriver type= kernel binPath= C:\path\to\TDSDriver.sys
+sc start TDSDriver
 ```
 
-## Licensing
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+---
+
+## 🗺 Roadmap
+- [ ] Implement ELAM (Early Launch Anti-Malware) support.
+- [ ] Add Kernel-mode stack walking for advanced ROP detection.
+- [ ] Integration with Microsoft Threat Intelligence (MSTI) feeds.
+- [ ] Real-time Registry Hive rollback.
+
+---
+
+## 📜 Legal Notice
+This tool is for **defensive research and educational purposes only**. See [DISCLAIMER.md](DISCLAIMER.md) for full terms. All contributions are subject to the [Apache License 2.0](LICENSE).
+
+---
+*Technical integrity is not a feature; it's a foundation. Zero polling. Zero simulations.*

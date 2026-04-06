@@ -1,32 +1,30 @@
-# Changelog: Threat Detection Suite
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
-## [4.2.0] - 2026-04-04
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-04-05
 
 ### Added
-- **Hardened Memory Forensics:** Multi-offset sampling for RWX regions and strict pointer overflow checks for x86/WOW64 compatibility.
-- **WFP Kernel Telemetry:** Integrated Windows Filtering Platform (WFP) Callouts for kernel-level network beaconing detection.
-- **Inverted Call Model:** Transitioned to asynchronous IRP-pending IPC for improved performance and stability.
-- **Professional Remediation:** Implemented reboot-persistent file quarantine and process termination with standardized exit codes.
-- **Modular Detectors:** Added specialized detectors for Registry persistence, Network C2, and Scheduled Tasks.
-- **Entropy Analysis:** Integrated robust entropy calculation with magic-byte verification to identify encrypted payloads.
+- Advanced Kernel Driver with support for Process, Thread, and Image Load notifications.
+- Windows Filtering Platform (WFP) callouts for real-time network telemetry.
+- Minifilter driver for file system operation monitoring.
+- Behavioral Correlation Engine in user-mode for complex attack pattern detection.
+- Automated Process Memory Dumping for forensic evidence collection.
+- Support for Event Tracing for Windows (ETW) threat intelligence providers.
+- Local pre-commit security shield with Snyk auditing.
+- Industrial GitHub Actions CI/CD pipeline.
 
 ### Fixed
-- **Critical Race Conditions:** Resolved TOCTOU vulnerabilities in network table enumeration.
-- **Resource Exhaustion:** Implemented size caps and drop policies for event queues and memory logs.
-- **Portability:** Replaced 32-bit `time_t` with 64-bit timestamps to prevent Y2K38 issues.
-- **LOLBin Escalation:** Normalized risk scoring to prevent conceptual overflow in PowerShell command-line analysis.
-- **Shared Access:** Fixed `CreateFileA` sharing violations in the driver connection bridge.
+- Hardened LSASS protection using strict path and device prefix validation.
+- Resolved kernel spinlock deadlocks and IRP cancellation race conditions.
+- Fixed memory alignment UB by moving atomics outside packed structures.
+- Optimized event queue management to prevent kernel pool exhaustion.
 
 ### Security
-- **Self-Protection:** Added kernel-level protection for the EDR service process via object callbacks.
-- **Caller Authentication:** Implemented privilege checks for IOCTL subscribers.
-- **Purged Legacy Scripts:** Removed rebranding utility from repository history.
-
-## [4.0.0] - 2026-04-04
-
-### Changed
-- **Architectural Shift:** Full transition from standalone binary to Kernel-Userland Service architecture.
-- **Branding:** Formalized "Threat Detection Suite" (TDS) branding across all assets.
-- **Telemetry:** Initial integration of ETW (Event Tracing for Windows) for core system visibility.
+- Implemented `ObRegisterCallbacks` for EDR self-protection.
+- Added detection for Early Bird APC injection and Process Hollowing.
+- Obfuscated sensitive kernel strings and randomized filter altitudes.
+- Added comprehensive `SECURITY.md` and `DISCLAIMER.md`.

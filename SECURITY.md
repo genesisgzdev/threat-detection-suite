@@ -1,34 +1,24 @@
-# SECURITY POLICY: Threat Detection Suite v4.2.0
+# Security Policy
 
-Threat Detection Suite is a high-security tool operating at the kernel level. We take the security of this software and its users with the utmost seriousness.
+## Supported Versions
+
+Only the latest version of the Threat Detection Suite is supported.
+
+| Version | Supported          |
+| ------- | ------------------ |
+| v4.6.x  | :white_check_mark: |
+| < v4.6  | :x:                |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Threat Detection Suite, please do **NOT** open a public issue. Instead, report it through our professional disclosure process:
+We take the security of this project seriously. If you believe you have found a security vulnerability, please report it to us by following these steps:
 
-1.  **Direct Communication:** Send a detailed email to `security@genzt.dev`.
-2.  **Encrypted Communication:** We highly recommend using PGP to encrypt your report.
-3.  **Detailed Report:** Include a clear description of the vulnerability, a proof-of-concept (PoC), and the potential impact assessment.
+1.  **DO NOT** open a public GitHub issue.
+2.  Email the maintainer at `genzt.dev@pm.me` with a detailed description of the issue, steps to reproduce, and potential impact.
+3.  Include any relevant logs, screenshots, or Proof of Concept (PoC) code.
 
-## Scope
+We will acknowledge your report within 48 hours and work with you to resolve the issue before making any public disclosure.
 
-This security policy covers:
-- **ThreatDetectionKernel Driver:** IOCTL handlers, memory management, and callback implementations.
-- **ThreatDetectionService:** Service-to-driver communication, ETW parsing, and command execution.
-- **TDSEngine:** Behavioral correlation logic and detection algorithms.
-- **IPC Protocols:** Any communication between the various components of the suite.
+## Disclosure Policy
 
-## Our Commitment
-
-- **Acknowledgment:** We will acknowledge receipt of your report within 24 hours.
-- **Investigation:** Our engineering team will investigate and validate the vulnerability immediately.
-- **Resolution:** We aim to provide a verified fix or mitigation within 14 days for high-severity issues.
-- **Recognition:** With your permission, we will credit you in our security advisories after the vulnerability is resolved.
-
-## Responsible Disclosure Guidelines
-
-- Do not attempt to exploit the vulnerability on systems you do not own.
-- Do not disclose the vulnerability publicly until an official fix has been released.
-- Give us a reasonable amount of time to address the issue before making it public.
-
-Thank you for helping us maintain the integrity of the Threat Detection Suite.
+We follow a coordinated vulnerability disclosure (CVD) model. We ask that researchers do not disclose details of the vulnerability until a patch has been released and users have had a reasonable amount of time to update.
