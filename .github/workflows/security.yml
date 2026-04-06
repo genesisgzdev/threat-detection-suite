@@ -16,8 +16,8 @@ jobs:
         continue-on-error: true
         run: |
           if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
-            npx snyk auth ${{ secrets.SNYK_TOKEN }} || true
-            npx snyk code test || true
+            npx --yes snyk auth ${{ secrets.SNYK_TOKEN }} || true
+            npx --yes snyk code test || true
           else
             echo "Skipping Snyk scan due to missing token."
           fi
