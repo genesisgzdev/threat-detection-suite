@@ -1,10 +1,7 @@
 name: Security Audit
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch: # Desactivado temporalmente el trigger automático debido a bloqueo de facturación en GitHub. Ejecutable manualmente.
 
 jobs:
   snyk-scan:
