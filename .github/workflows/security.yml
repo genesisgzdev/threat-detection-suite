@@ -1,13 +1,22 @@
-﻿name: Security Audit
+name: Security Audit
 
 on:
-  workflow_dispatch: # Desactivado temporalmente el trigger automÃ¡tico debido a bloqueo de facturaciÃ³n en GitHub. Ejecutable manualmente.
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   snyk-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Node.js (for npx)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Run Snyk to check for vulnerabilities
         continue-on-error: true
@@ -16,6 +25,18 @@ jobs:
             npx --yes snyk auth ${{ secrets.SNYK_TOKEN }} || true
             npx --yes snyk code test || true
           else
-            echo "Skipping Snyk scan due to missing token."
+            echo "::warning::Skipping Snyk scan due to missing SNYK_TOKEN secret."
           fi
 
+  osv-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action/scan@v1.9.0
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --recursive
+            ./
