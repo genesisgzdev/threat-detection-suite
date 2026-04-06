@@ -75,6 +75,8 @@ BOOLEAN IsLsass(PEPROCESS Process) {
     BOOLEAN match = FALSE;
 
     if (NT_SUCCESS(SeLocateProcessImageName(Process, &procName))) {
+        // Mandatory path validation: Prevent path-based evasion/spoofing
+        // Ensures the process starts at the harddisk volume and ends at the system path
         if (RtlPrefixUnicodeString(&lsassPrefix, procName, TRUE) && 
             RtlSuffixUnicodeString(&lsassSuffix, procName, TRUE)) {
             match = TRUE;
