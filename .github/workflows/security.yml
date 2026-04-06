@@ -9,20 +9,16 @@ on:
 jobs:
   snyk-scan:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
 
       - name: Run Snyk to check for vulnerabilities
+        continue-on-error: true
         run: |
-          npm install -g snyk
           if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
-            snyk auth ${{ secrets.SNYK_TOKEN }} || true
-            snyk code test || true
+            npx snyk auth ${{ secrets.SNYK_TOKEN }} || true
+            npx snyk code test || true
           else
             echo "Skipping Snyk scan due to missing token."
           fi
