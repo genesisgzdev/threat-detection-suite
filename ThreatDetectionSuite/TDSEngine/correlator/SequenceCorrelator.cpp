@@ -1,4 +1,4 @@
-#include "SequenceCorrelator.h"
+﻿#include "SequenceCorrelator.h"
 #include <iostream>
 #include <fstream>
 #include <map>
@@ -35,7 +35,7 @@ void SequenceCorrelator::Analyze(const Event& event) {
         return;
     }
 
-    // Industrial APC / Early Bird Detection Logic
+    // production APC / Early Bird Detection Logic
     if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection) {
         auto it = g_ProcessStates.find(event.Pid);
         if (it != g_ProcessStates.end()) {
@@ -72,3 +72,4 @@ void SequenceCorrelator::LoadFromDisk() {
 }
 
 } // namespace TDS
+

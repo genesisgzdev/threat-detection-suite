@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import sys
 import datetime
@@ -105,3 +105,4 @@ if __name__ == "__main__":
                 print("DEBUG: Waiting for threat payload...")
         except json.JSONDecodeError:
             print("ERROR: Invalid JSON payload provided.")
+

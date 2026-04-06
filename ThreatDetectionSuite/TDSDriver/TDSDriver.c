@@ -1,4 +1,4 @@
-#include <ntifs.h>
+﻿#include <ntifs.h>
 #include <ntddk.h>
 #include <fltKernel.h>
 #include <fwpsk.h>
@@ -69,7 +69,7 @@ BOOLEAN IsLsass(PEPROCESS Process) {
     UNICODE_STRING lsassPrefix;
     RtlInitUnicodeString(&lsassPrefix, L"\\Device\\HarddiskVolume"); 
     UNICODE_STRING lsassSuffix;
-    RtlInitUnicodeString(&lsassSuffix, L"\\Windows\\System32\\lsass.exe");
+    RtlInitUnicodeString(&lsassSuffix, L"\\Windows\\system\\lsass.exe");
     
     PUNICODE_STRING procName = NULL;
     BOOLEAN match = FALSE;
@@ -582,3 +582,5 @@ void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIM
     if (imgLen > 0) { iEvent->ImagePathOffset = (ULONG)((PUCHAR)(iEvent + 1) - (PUCHAR)header); RtlCopyMemory(iEvent + 1, FullImageName->Buffer, imgLen); }
     QueueTDSEvent(item);
 }
+
+

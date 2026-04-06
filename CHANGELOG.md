@@ -1,11 +1,11 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to the Threat Detection Suite (TDS) project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2025-05-20
+## [0.1.0] - 2026-05-20
 
 ### Added
 - **100% Event-Driven Core**: Replaced all legacy polling logic with native kernel callbacks.
@@ -22,3 +22,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened driver altitudes and randomized device object names.
 - Mandatory Snyk SAST and OSV-Scanner checks in CI/CD.
 - Responsible disclosure policy ([SECURITY.md](SECURITY.md)) and ethical use guidelines ([DISCLAIMER.md](DISCLAIMER.md)).
+

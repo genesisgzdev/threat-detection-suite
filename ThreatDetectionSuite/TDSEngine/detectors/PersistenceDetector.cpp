@@ -1,4 +1,4 @@
-#include "PersistenceDetector.h"
+﻿#include "PersistenceDetector.h"
 #include <wbemidl.h>
 #include <taskschd.h>
 #include <comdef.h>
@@ -191,3 +191,4 @@ void PersistenceDetector::ScanDirectory(const std::wstring& directory, int depth
 }
 
 } // namespace TDS
+

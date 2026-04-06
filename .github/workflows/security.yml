@@ -1,7 +1,7 @@
-name: Security Audit
+﻿name: Security Audit
 
 on:
-  workflow_dispatch: # Desactivado temporalmente el trigger automático debido a bloqueo de facturación en GitHub. Ejecutable manualmente.
+  workflow_dispatch: # Desactivado temporalmente el trigger automÃ¡tico debido a bloqueo de facturaciÃ³n en GitHub. Ejecutable manualmente.
 
 jobs:
   snyk-scan:
@@ -18,3 +18,4 @@ jobs:
           else
             echo "Skipping Snyk scan due to missing token."
           fi
+

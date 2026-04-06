@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal enabledelayedexpansion
 
 echo [*] Starting Threat Detection Suite v4.2.0 Build Process
@@ -60,3 +60,4 @@ if exist "!MSBUILD_PATH!" (
 echo [*] Build Process Finalized.
 echo [INFO] Binaries available in bin/Release and TDSDriver/x64/Release
 pause
+

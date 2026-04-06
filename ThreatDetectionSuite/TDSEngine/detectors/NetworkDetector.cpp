@@ -1,4 +1,4 @@
-#include "NetworkDetector.h"
+﻿#include "NetworkDetector.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <psapi.h>
@@ -81,3 +81,4 @@ bool NetworkDetector::IsSuspiciousPort(USHORT port) {
 }
 
 } // namespace TDS
+

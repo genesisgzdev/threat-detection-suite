@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifdef _KERNEL_MODE
 #include <ntddk.h>
@@ -196,3 +196,4 @@ inline const char* GetTDSSeverityName(TDS_THREAT_SEVERITY severity) {
 #define MAX_EVENT_BUFFER_SIZE 4096
 #define EVENT_QUEUE_LIMIT 5000 
 #define TDS_TERMINATION_EXIT_CODE 0xDEAD
+

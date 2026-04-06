@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 #include <map>
 #include <deque>
@@ -28,3 +28,4 @@ private:
 };
 
 } // namespace TDS
+

@@ -1,4 +1,4 @@
-#include "EtwCollector.h"
+﻿#include "EtwCollector.h"
 #include <iostream>
 #include <system_error>
 #include <vector>
@@ -178,3 +178,4 @@ void WINAPI EtwCollector::EventRecordCallback(PEVENT_RECORD pEvent) {
 }
 
 } // namespace TDS
+

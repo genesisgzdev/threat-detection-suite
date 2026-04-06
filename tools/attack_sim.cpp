@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <iostream>
 #include <string>
 
@@ -43,3 +43,4 @@ int main(int argc, char* argv[]) {
     CloseHandle(hProcess);
     return 0;
 }
+

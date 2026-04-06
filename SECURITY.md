@@ -1,4 +1,4 @@
-# Security Policy: Responsible Disclosure
+﻿# Security Policy: Responsible Disclosure
 
 The Threat Detection Suite (TDS) team is committed to ensuring the security and integrity of our users' systems. We recognize the critical role that security researchers play in the ecosystem and welcome their contributions through responsible disclosure.
 
@@ -6,7 +6,7 @@ The Threat Detection Suite (TDS) team is committed to ensuring the security and 
 
 If you discover a security vulnerability within TDS, we ask that you provide us with the opportunity to remediate the issue before any public disclosure.
 
-### 🛡️ Submission Process
+### ðŸ›¡ï¸ Submission Process
 1.  **DO NOT** open public issues or pull requests for security vulnerabilities.
 2.  Send an encrypted email to `security@tds-project.org` (PGP Key ID: `0xDEADBEEF`) or use our private reporting portal if available.
 3.  Include a detailed description of the vulnerability, including:
@@ -15,7 +15,7 @@ If you discover a security vulnerability within TDS, we ask that you provide us 
     -   A Proof-of-Concept (PoC) if possible (please ensure PoCs are safe and non-destructive).
     -   Potential impact assessment.
 
-### 🤝 Our Commitment
+### ðŸ¤ Our Commitment
 - We will acknowledge receipt of your report within **24-48 hours**.
 - We will provide a preliminary assessment and an estimated timeline for a fix.
 - We will notify you once the vulnerability has been patched.
@@ -31,3 +31,4 @@ While we encourage research, the following actions are strictly prohibited:
 We follow a coordinated disclosure model. We generally aim to release a patch and a security advisory within **90 days** of the report. We ask that you refrain from sharing technical details publicly until the patch is available.
 
 Thank you for helping us keep the Windows kernel a safer place.
+

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 #include <string>
 #include <dbghelp.h>
@@ -44,7 +44,7 @@ public:
             return false;
         }
 
-        // Industrial-grade dump: Full memory for deep inspection
+        // production dump: Full memory for deep inspection
         MINIDUMP_TYPE dumpType = (MINIDUMP_TYPE)(MiniDumpWithFullMemory | 
                                                  MiniDumpWithHandleData | 
                                                  MiniDumpWithUnloadedModules | 
@@ -62,3 +62,4 @@ private:
 };
 
 } // namespace TDS
+

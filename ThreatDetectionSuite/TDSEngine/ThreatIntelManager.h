@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -23,7 +23,7 @@ public:
      * @returns string - Enriched threat description.
      */
     std::string EnrichIoC(const std::string& ioc) {
-        // In a real industrial environment, this calls the GTI MCP tools or REST API.
+        // In a real production environment, this calls the GTI MCP tools or REST API.
         // For now, we structure the request logic.
         if (ioc.empty()) return "No IoC provided for enrichment.";
         
@@ -35,3 +35,4 @@ private:
 };
 
 } // namespace TDS
+

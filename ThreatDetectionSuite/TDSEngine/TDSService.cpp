@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -115,3 +115,5 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     engine.Shutdown();
     return ERROR_SUCCESS;
 }
+
+

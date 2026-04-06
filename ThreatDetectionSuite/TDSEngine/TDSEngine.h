@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 #include <unordered_set>
 #include <string>
@@ -88,3 +88,4 @@ private:
 };
 
 } // namespace TDS
+

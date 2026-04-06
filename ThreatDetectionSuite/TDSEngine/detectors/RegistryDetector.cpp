@@ -1,4 +1,4 @@
-#include "RegistryDetector.h"
+﻿#include "RegistryDetector.h"
 #include <iostream>
 #include <algorithm>
 #include <wintrust.h>
@@ -201,3 +201,4 @@ void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {
 }
 
 } // namespace TDS
+

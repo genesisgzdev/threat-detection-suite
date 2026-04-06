@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 # Threat Detection Suite v4.0 - Automated Build Script (Linux/Tooling)
 # Note: Full driver build requires a Windows environment with WDK.
@@ -32,3 +32,4 @@ if command -v clang-tidy &> /dev/null; then
 fi
 
 echo "[CORE] Threat Detection Suite Toolchain Execution Complete."
+

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 #include <evntrace.h>
 #include <evntcons.h>
@@ -43,3 +43,4 @@ private:
 };
 
 } // namespace TDS
+

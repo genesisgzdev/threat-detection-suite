@@ -1,4 +1,4 @@
-#include "TDSEngine.h"
+﻿#include "TDSEngine.h"
 #include <iostream>
 #include <chrono>
 #include <tlhelp32.h>
@@ -288,3 +288,4 @@ void TDSEngine::UpdateNetworkStats(DWORD pid, double latency) {
 }
 
 } // namespace TDS
+

@@ -1,4 +1,4 @@
-# BUILDING: Threat Detection Suite v4.2.0
+﻿# BUILDING: Threat Detection Suite v4.2.0
 
 This guide provides instructions for building the Threat Detection Suite suite from source. The project uses a modular build process involving CMake for user-mode components and the Windows Driver Kit (WDK) for the kernel-mode driver.
 
@@ -62,3 +62,4 @@ You can also use the provided build scripts for an automated process:
 - **Missing WDK:** If MSBuild fails to find driver targets, reinstall the WDK and the Visual Studio extension.
 - **CMake Errors:** Ensure `WIN32_LEAN_AND_MEAN` is handled correctly if adding new dependencies.
 - **Driver Loading Failures:** Check `DbgView` (with "Capture Kernel" enabled) for status messages from `TDS: Kernel Gateway`.
+

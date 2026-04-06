@@ -8,14 +8,14 @@ TDS operates on a tiered interception model, utilizing an **Inverted Call Model*
 
 ```mermaid
 graph TD
-    subgraph "Kernel Space (Ring 0)"
+    subgraph "Kernel Space"
         A[Minifilter: File System] --> E[Event Dispatcher]
         B[WFP: Network Stack] --> E
         C[ObCallbacks: Handle Filter] --> E
         D[Registry Callbacks] --> E
         E --> F[Pending IRP Queue]
     end
-    subgraph "User Space (Ring 3)"
+    subgraph "User Space"
         G[TDSService.exe] -->|IOCTL_GET_EVENT| F
         G --> H[Sequence Correlator]
         H --> I[Incident Reporting Bot]
@@ -75,7 +75,7 @@ net start TDSService
 ```
 
 ## Maintenance and Research
-Developed for advanced security research and audit purposes. Finalized April 6, 2026. This suite contains zero simulated logic; all detections are based on native kernel callbacks and telemetry.
+Developed by the developer for advanced security research and audit purposes. Finalized April 6, 2026. This suite contains zero simulated logic; all detections are based on native kernel callbacks and telemetry.
 
 ---
 *Technical Integrity. Event-Driven. April 2026.*

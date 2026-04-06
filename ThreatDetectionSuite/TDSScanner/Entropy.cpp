@@ -1,4 +1,4 @@
-#include "Entropy.h"
+﻿#include "Entropy.h"
 #include <cmath>
 
 namespace TDS {
@@ -70,3 +70,4 @@ bool Entropy::IsFileHighEntropy(const std::wstring& filePath, float threshold) {
 }
 
 } // namespace TDS
+

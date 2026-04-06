@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.20)
 project(ThreatDetectionSuite VERSION 4.10.0)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -43,3 +43,4 @@ install(TARGETS TDSService TDSBridge
 # Testing Configuration
 enable_testing()
 # add_test(NAME IntegrationTest COMMAND TDSBridge --test)
+

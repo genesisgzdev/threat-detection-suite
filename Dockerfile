@@ -1,4 +1,4 @@
-# Threat Detection Suite - CI Build Environment (Windows Server Core 2022)
+﻿# Threat Detection Suite - CI Build Environment (Windows Server Core 2022)
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
 LABEL maintainer="security@genzt.dev"
@@ -13,3 +13,4 @@ RUN cmake --build build --config Release
 
 # Note: Kernel driver build requires WDK which is typically not pre-installed in servercore
 CMD ["build/bin/Release/TDSService.exe"]
+

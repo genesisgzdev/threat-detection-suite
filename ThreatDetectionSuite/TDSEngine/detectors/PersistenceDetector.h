@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 #include <string>
 
@@ -15,3 +15,4 @@ private:
 };
 
 } // namespace TDS
+

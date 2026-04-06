@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -80,3 +80,4 @@ int main() {
     CloseHandle(hDevice);
     return 0;
 }
+

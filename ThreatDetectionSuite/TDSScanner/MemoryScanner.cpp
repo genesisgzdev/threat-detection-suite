@@ -1,4 +1,4 @@
-#include "MemoryScanner.h"
+﻿#include "MemoryScanner.h"
 #include <iostream>
 #include <algorithm>
 #include <tlhelp32.h>
@@ -375,3 +375,4 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
 }
 
 } // namespace TDS
+
