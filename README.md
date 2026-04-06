@@ -1,7 +1,7 @@
 # Threat Detection Suite (TDS)
 > **Advanced Event-Driven Endpoint Detection and Response (EDR) for Windows**
 
-[![Security Status](https://img.shields.io/badge/Security-Snyk%20Certified-blueviolet?style=for-the-badge&logo=snyk)](https://app.snyk.io/org/genesisgzdev)
+[![Security Status](https://img.shields.io/badge/Security-Snyk%20Certified-blueviolet?style=for-the-badge&logo=snyk)](https://github.com/genesisgzdev/threat-detection-suite/security/code-scanning)
 [![Kernel Mode](https://img.shields.io/badge/Kernel-WDM%20%7C%20WDF-blue?style=for-the-badge)](https://docs.microsoft.com/en-us/windows-hardware/drivers/kernel/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-red?style=for-the-badge)](LICENSE)
 [![CI Status](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml/badge.svg)](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml)
