@@ -3,7 +3,7 @@
 #include <string>
 
 /**
- * Industrial Attack Simulator (Refined)
+ * Native Attack Simulator (Refined)
  * Attempts to acquire high-privilege handles to validate EDR handle stripping.
  */
 int main(int argc, char* argv[]) {

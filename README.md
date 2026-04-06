@@ -52,4 +52,4 @@ sc start TDSDriver
 ```
 
 ## Notice
-Developed by The Developer for security research and audit purposes. Finalized April 6, 2026.
+Developed by the developer for security research and audit purposes. Finalized April 6, 2026.
