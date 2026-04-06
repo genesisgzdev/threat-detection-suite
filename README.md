@@ -8,14 +8,14 @@ The core utilizes an Inverted Call Model to provide asynchronous telemetry from 
 
 ```mermaid
 graph TD
-    subgraph K_Space [Kernel Space]
+    subgraph "Kernel Space"
         A[Minifilter: File IO] --> E[Event Dispatcher]
         B[WFP: Network Flow] --> E
         C[ObCallbacks: Process Protection] --> E
         D[Registry Callbacks] --> E
         E --> F[Pending IRP Queue]
     end
-    subgraph U_Space [User Space]
+    subgraph "User Space"
         G[TDSService.exe] -->|IOCTL_GET_EVENT| F
         G --> H[Sequence Correlator]
         H --> I[Incident Reporting]
@@ -27,7 +27,7 @@ graph TD
 ### Core Interception Mechanisms
 
 - **Process & Thread Monitor**: Intercepts `CREATE_SUSPENDED` events and remote thread creations. Implements path validation for system processes.
-- **Network Filtering (WFP)**: High-performance callouts for IPv4/v6 and UDP/DNS telemetry without user-mode hooking.
+- **Network Filtering (WFP)**: Callouts for IPv4/v6 and UDP/DNS telemetry without user-mode hooking.
 - **File System Monitoring (Minifilter)**: Post-operation interception of IRPs to identify anomalous entropy and file modifications.
 - **Self-Protection**: Enforces handle stripping via `ObRegisterCallbacks` to prevent unauthorized termination or memory access.
 
