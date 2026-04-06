@@ -1,30 +1,55 @@
 # Threat Detection Suite (TDS)
 
-Advanced Endpoint Detection and Response (EDR) suite for Windows environments. TDS provides high-fidelity kernel-mode interception and user-mode forensic analysis capabilities.
+High-fidelity Endpoint Detection and Response (EDR) core for Windows. Built on a zero-polling, event-driven architecture for kernel-mode interception and real-time forensic analysis.
 
-## Architecture
+## Technical Architecture
 
-The system is composed of two primary layers:
+The system utilizes an **Inverted Call Model** to ensure zero-latency telemetry delivery from Ring 0 to Ring 3.
 
-### 1. Kernel Interceptor (TDSDriver.sys)
-A Ring 0 driver implementing multiple interception mechanisms:
-- **Minifilter Driver**: Intercepts file I/O operations to detect ransomware patterns and unauthorized file access.
-- **WFP (Windows Filtering Platform)**: Monitors network connections (IPv4/v6/UDP) to identify C2 beacons and malicious data exfiltration.
-- **Object Callbacks**: Protects critical system processes (like LSASS) and the EDR service itself from termination and manipulation.
-- **Registry Callbacks**: Monitors and blocks unauthorized persistence attempts in the Windows Registry.
+```mermaid
+graph TD
+    subgraph Kernel Space (Ring 0)
+        A[Minifilter: File IO] -->|Queue| E[Event Dispatcher]
+        B[WFP: Network Flow] -->|Queue| E
+        C[ObCallbacks: Self-Protection] -->|Queue| E
+        D[Registry Callbacks] -->|Queue| E
+        E -->|Complete| F[Pending IRP Queue]
+    end
+    subgraph User Space (Ring 3)
+        G[TDSService.exe] -->|IOCTL_GET_EVENT| F
+        G -->|Process| H[Sequence Correlator]
+        H -->|Alert| I[SOC Reporting]
+        H -->|Action| J[IPS Manager: Block/Kill]
+        G -->|Forensics| K[Memory Scanner / Dump]
+    end
+```
 
-### 2. Detection Engine (TDSService.exe)
-A native Windows Service that orchestrates telemetry processing:
-- **Sequence Correlator**: Links discrete kernel events to identify complex attack chains such as Process Hollowing and Early Bird APC Injection.
-- **Memory Scanner**: Performs architecture-agnostic PE header analysis and scans for reflective loading in private memory regions.
-- **Forensic Manager**: Automatically generates process memory dumps for critical detections using standard Windows APIs.
+### Core Interception Modules
 
-## Security and Integrity
+-   **Process & Thread Monitor**: Captures `CREATE_SUSPENDED` events and remote thread injections. Implements strict path validation for critical processes like LSASS.
+-   **Network Shield (WFP)**: Native callouts for IPv4/v6 and UDP/DNS. Identifies C2 patterns and DGA activity without user-mode hooks.
+-   **File Guard (Minifilter)**: Post-operation interception of IRPs to detect rapid entropy changes (Ransomware indicators).
+-   **Self-Protection**: Uses `ObRegisterCallbacks` to strip dangerous access rights (`PROCESS_TERMINATE`, `PROCESS_VM_WRITE`) from handles targeting EDR components.
 
-- **Zero Dependency Mindset**: Core detection logic uses native Windows APIs to ensure maximum performance and minimum footprint.
-- **Self-Protection**: The EDR process and its threads are shielded at the kernel level against unauthorized access and termination.
-- **Standardized Telemetry**: Event logs are generated in structured JSONL format, prepared for integration with SOC platforms like Google SecOps (Chronicle).
+## Real-Time Engine Characteristics
 
-## Disclaimer
+-   **Zero-Polling**: The driver remains dormant until a kernel callback is triggered.
+-   **Asynchronous IPC**: Uses pending IRPs to "push" events to the service immediately.
+-   **Atomic Forensics**: Automatic memory dumping via `MiniDumpWriteDump` upon critical detection.
 
-This software is provided for research and security auditing purposes. Ensure proper authorization before deployment in production environments.
+## Getting Started
+
+### Prerequisites
+- Windows 10/11 x64 (Test Signing Enabled)
+- Visual Studio 2022 + WDK
+
+### Build & Load
+```powershell
+cmake -B build
+cmake --build build --config Release
+sc create TDSDriver type= kernel binPath= C:\path\to\TDSDriver.sys
+sc start TDSDriver
+```
+
+## Security Notice
+For defensive research and educational purposes only. Zero simulated logic. Full native implementation.

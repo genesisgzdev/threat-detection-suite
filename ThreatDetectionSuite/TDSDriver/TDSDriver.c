@@ -108,54 +108,61 @@ VOID CancelPendingIrp(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 void DispatchPendingEvents() {
     KIRQL irpIrql, eventIrql;
     
-    KeAcquireSpinLock(&g_IrpQueueLock, &irpIrql);
-    KeAcquireSpinLock(&g_EventQueueLock, &eventIrql);
+    while (TRUE) {
+        KeAcquireSpinLock(&g_IrpQueueLock, &irpIrql);
+        if (IsListEmpty(&g_PendingIrpList)) {
+            KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
+            break;
+        }
 
-    if (IsListEmpty(&g_PendingIrpList) || IsListEmpty(&g_EventQueueHead)) {
+        KeAcquireSpinLock(&g_EventQueueLock, &eventIrql);
+        if (IsListEmpty(&g_EventQueueHead)) {
+            KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
+            KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
+            break;
+        }
+
+        // Industrial Safety: Clear cancel routine BEFORE removing from list
+        PLIST_ENTRY irpEntry = g_PendingIrpList.Flink;
+        PTDS_PENDING_IRP pIrp = CONTAINING_RECORD(irpEntry, TDS_PENDING_IRP, ListEntry);
+        PIRP Irp = pIrp->Irp;
+
+        if (IoSetCancelRoutine(Irp, NULL) == NULL) {
+            // IRP is already being cancelled, skip it
+            RemoveEntryList(&pIrp->ListEntry);
+            ExFreePoolWithTag(pIrp, 'SDTe');
+            KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
+            KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
+            continue;
+        }
+
+        // Safe to remove both now
+        RemoveEntryList(&pIrp->ListEntry);
+        PLIST_ENTRY eventEntry = RemoveHeadList(&g_EventQueueHead);
+        g_EventQueueCount--;
+        PEVENT_ITEM pEvent = CONTAINING_RECORD(eventEntry, EVENT_ITEM, ListEntry);
+
         KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
         KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
-        return;
-    }
 
-    PLIST_ENTRY irpEntry = RemoveHeadList(&g_PendingIrpList);
-    PTDS_PENDING_IRP pIrp = CONTAINING_RECORD(irpEntry, TDS_PENDING_IRP, ListEntry);
-    
-    PLIST_ENTRY eventEntry = RemoveHeadList(&g_EventQueueHead);
-    g_EventQueueCount--;
-    PEVENT_ITEM pEvent = CONTAINING_RECORD(eventEntry, EVENT_ITEM, ListEntry);
+        PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
+        ULONG outLen = irpSp->Parameters.DeviceIoControl.OutputBufferLength;
+        PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(pEvent + 1);
+        ULONG requiredLen = sizeof(TDS_EVENT_HEADER) + header->DataSize;
 
-    PIRP Irp = pIrp->Irp;
-    
-    if (IoSetCancelRoutine(Irp, NULL) == NULL) {
-        InsertHeadList(&g_EventQueueHead, &pEvent->ListEntry);
-        g_EventQueueCount++;
-        KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
-        KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
+        if (outLen >= requiredLen) {
+            RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, header, requiredLen);
+            Irp->IoStatus.Status = STATUS_SUCCESS;
+            Irp->IoStatus.Information = requiredLen;
+        } else {
+            Irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+            Irp->IoStatus.Information = 0;
+        }
+
+        IoCompleteRequest(Irp, IO_NO_INCREMENT);
         ExFreePoolWithTag(pIrp, 'SDTe');
-        return;
+        ExFreePoolWithTag(pEvent, 'SDTe');
     }
-
-    KeReleaseSpinLock(&g_EventQueueLock, eventIrql);
-    KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
-
-    PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
-    ULONG outLen = irpSp->Parameters.DeviceIoControl.OutputBufferLength;
-    
-    PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(pEvent + 1);
-    ULONG requiredLen = sizeof(TDS_EVENT_HEADER) + header->DataSize;
-
-    if (outLen >= requiredLen) {
-        RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, header, requiredLen);
-        Irp->IoStatus.Status = STATUS_SUCCESS;
-        Irp->IoStatus.Information = requiredLen;
-    } else {
-        Irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
-        Irp->IoStatus.Information = 0;
-    }
-
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-    ExFreePoolWithTag(pIrp, 'SDTe');
-    ExFreePoolWithTag(pEvent, 'SDTe');
 }
 
 void QueueTDSEvent(PEVENT_ITEM item) {
