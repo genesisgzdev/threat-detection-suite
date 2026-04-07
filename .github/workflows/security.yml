@@ -7,44 +7,28 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  security-events: write
-
 jobs:
-  snyk-scan:
+  docker-validation:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Build EDR Suite Container
+        run: docker build -t tds-edr-suite .
 
-      - name: Setup Node.js (Required for Snyk 2.0+)
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: OSV-Scanner (Dockerized)
+        run: |
+          docker run --rm -v $(pwd):/src ghcr.io/google/osv-scanner:latest /src -r
 
-      - name: Run Snyk to check for vulnerabilities
+  snyk-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Snyk
         uses: snyk/actions/setup@v3
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
       - name: Snyk Code Test
-        run: snyk code test --sarif-file-output=snyk.sarif
+        run: snyk code test
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload Snyk report to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: snyk.sarif
-        if: always()
-
-  osv-scanner:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run OSV-Scanner
-        uses: google/osv-scanner-action/scan@v1
-        with:
-          scan-args: |-
-            --recursive
-            ./
