@@ -7,20 +7,28 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   snyk-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Snyk
+      - name: Setup Node.js (Required for Snyk 2.0+)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/setup@v3
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       - name: Snyk Code Test
-        run: |
-          snyk code test --sarif-file-output=snyk.sarif
+        run: snyk code test --sarif-file-output=snyk.sarif
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
