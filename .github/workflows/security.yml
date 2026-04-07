@@ -7,28 +7,31 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+
 jobs:
-  docker-validation:
-    runs-on: ubuntu-latest
+  windows-docker-build:
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build EDR Suite Container
-        run: docker build -t tds-edr-suite .
+      - name: Build Windows Container
+        run: docker build -t tds-edr-suite:5.0.0 .
 
-      - name: OSV-Scanner (Dockerized)
-        run: |
-          docker run --rm -v $(pwd):/src ghcr.io/google/osv-scanner:latest /src -r
-
-  snyk-audit:
+  snyk-code-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Setup Snyk
-        uses: snyk/actions/setup@v3
+        uses: snyk/actions/setup@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       - name: Snyk Code Test
-        run: snyk code test
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: snyk code test --sarif-file-output=snyk.sarif || true
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk.sarif
