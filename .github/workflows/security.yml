@@ -9,8 +9,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Snyk to check for vulnerabilities
-        continue-on-error: true
+      - name: Setup Snyk
+        uses: snyk/actions/setup@v3
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Code Test
         run: |
           if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
             npx --yes snyk auth ${{ secrets.SNYK_TOKEN }} || true

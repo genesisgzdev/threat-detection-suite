@@ -2,7 +2,7 @@ import json
 import os
 import sys
 import datetime
-from github import Github
+from github import Github, Auth
 
 class ThreatReporter:
     def __init__(self):
@@ -15,7 +15,9 @@ class ThreatReporter:
             return False
         
         try:
-            self.gh = Github(self.github_token)
+            # Modern GitHub Auth (resolves 401/403 related to token legacy format)
+            auth = Auth.Token(self.github_token)
+            self.gh = Github(auth=auth)
             self.repo = self.gh.get_repo(self.repo_name)
             return True
         except Exception as e:
@@ -41,7 +43,7 @@ class ThreatReporter:
 - **Description:** {description}
 - **Artifact/IoC:** `{ioc}`
 - **Target PID:** {pid}
-- **Timestamp (UTC):** {datetime.datetime.utcnow().isoformat()}Z
+- **Timestamp (UTC):** {datetime.datetime.now(datetime.UTC).isoformat()}Z
 
 ### Verification
 - **Kernel Integrity:** ObRegisterCallbacks enforced.
@@ -56,33 +58,23 @@ class ThreatReporter:
             self.fallback_report(title, body, str(e))
 
     def fallback_report(self, title, body, error):
-        fallback_path = os.getenv('SOC_FALLBACK_LOG', 'incident_report.log')
-        try:
-            with open(fallback_path, 'a') as f:
-                timestamp = datetime.datetime.utcnow().isoformat()
-                f.write(f"\n{'='*50}\n")
-                f.write(f"FALLBACK REPORT - {timestamp}Z\n")
-                f.write(f"ORIGINAL ERROR: {error}\n")
-                f.write(f"TITLE: {title}\n")
-                f.write(f"BODY: {body}\n")
-                f.write(f"{'='*50}\n")
-            print(f"INFO: Fallback report saved to {fallback_path}")
-        except Exception as fe:
-            print(f"CRITICAL: Fallback reporting also failed: {str(fe)}")
-            sys.stderr.write(f"CRITICAL SOC ALERT: {title}\n{body}\n")
+        """Logs to local secure file if GitHub is inaccessible."""
+        log_path = os.getenv('SOC_FALLBACK_LOG', 'incident_report.log')
+        with open(log_path, 'a') as f:
+            f.write(f"\n--- {title} ---\n{body}\nError: {error}\n")
+        print(f"CRITICAL: Remote reporting failed. Incident persisted to {log_path}")
 
 if __name__ == "__main__":
     reporter = ThreatReporter()
     if reporter.initialize_clients():
         try:
-            input_data = sys.argv[1]
-            # Check if input is a path or raw JSON
-            if os.path.exists(input_data):
-                with open(input_data, 'r') as f:
-                    data = json.load(f)
-            else:
-                data = json.loads(input_data)
-            
-            reporter.process_incident(data)
+            if len(sys.argv) > 1:
+                input_data = sys.argv[1]
+                if os.path.exists(input_data):
+                    with open(input_data, 'r') as f:
+                        data = json.load(f)
+                else:
+                    data = json.loads(input_data)
+                reporter.process_incident(data)
         except Exception as e:
             print(f"ERROR: Input processing failed: {str(e)}")
