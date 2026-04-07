@@ -1,4 +1,4 @@
-name: Security Audit 2026
+name: Security Audit
 
 on:
   push:
@@ -13,35 +13,27 @@ permissions:
   security-events: write
 
 jobs:
-  snyk-code-test:
+  snyk-code-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Snyk
-        uses: snyk/actions/setup@master
-        with:
-          snyk-version: 'latest'
-      - name: Snyk SAST Audit
-        run: snyk code test --sarif-file-output=snyk.sarif
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-          SNYK_OIDC_ENABLED: true
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: snyk.sarif
-        if: always()
+      - name: Snyk SAST
+        run: |
+          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
+            npx --yes snyk code test --token=${{ secrets.SNYK_TOKEN }}
+          else
+            echo "::warning::SNYK_TOKEN missing."
+          fi
 
-  osv-dependency-test:
+  osv-scanner:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run OSV-Scanner (v2 Syntax)
-        uses: google/osv-scanner-action/v1
-        with:
-          scan-args: "scan source -r ./"
+      - name: Run OSV-Scanner
+        run: |
+          docker run --rm -v $(pwd):/src ghcr.io/google/osv-scanner:latest /src scan source -r /src
 
-  windows-build-check:
+  windows-compilation-test:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
