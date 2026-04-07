@@ -411,7 +411,58 @@ FLT_PREOP_CALLBACK_STATUS TDSPreSetInformationCallback(_Inout_ PFLT_CALLBACK_DAT
     return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
 
-CONST FLT_OPERATION_REGISTRATION Callbacks[] = { { IRP_MJ_CREATE, 0, NULL, TDSPostCreateCallback }, { IRP_MJ_SET_INFORMATION, 0, TDSPreSetInformationCallback, NULL }, { IRP_MJ_OPERATION_END } };
+FLT_PREOP_CALLBACK_STATUS TDSPreAcquireForSectionSynchronizationCallback(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Flt_CompletionContext_Outptr_ PVOID *CompletionContext
+) {
+    UNREFERENCED_PARAMETER(FltObjects);
+    UNREFERENCED_PARAMETER(CompletionContext);
+
+    if (Data->RequestorMode == KernelMode) return FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    if (Data->Iopb->Parameters.AcquireForSectionSynchronization.SyncType == SyncTypeCreateSection) {
+        ULONG prot = Data->Iopb->Parameters.AcquireForSectionSynchronization.PageProtection;
+        // Check for executable page protection flags
+        if (prot & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) {
+            // DLL Ghosting detection: CreateSection on a file with DeletePending set
+            if (Data->Iopb->TargetFileObject && Data->Iopb->TargetFileObject->DeletePending) {
+                PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
+                if (NT_SUCCESS(FltGetFileNameInformation(Data, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT, &nameInfo))) {
+                    FltParseFileNameInformation(nameInfo);
+                    ULONG pathLen = nameInfo->Name.Length;
+                    ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen;
+                    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
+                    if (item) {
+                        RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
+                        PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1);
+                        h->Type = TDSEventGhostingAttempt; 
+                        h->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+                        h->DataSize = dataSize; 
+                        KeQuerySystemTimePrecise((PLARGE_INTEGER)&h->Timestamp);
+                        PTDS_FILE_EVENT_DATA f = (PTDS_FILE_EVENT_DATA)(h + 1); 
+                        f->Operation = 4; // Ghosting Attempt
+                        f->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA);
+                        RtlCopyMemory((PUCHAR)h + f->FilePathOffset, nameInfo->Name.Buffer, pathLen);
+                        QueueTDSEvent(item);
+                    }
+                    FltReleaseFileNameInformation(nameInfo);
+                }
+                // BLOCK the operation to neutralize the ghosting attack
+                Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+                return FLT_PREOP_COMPLETE;
+            }
+        }
+    }
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+CONST FLT_OPERATION_REGISTRATION Callbacks[] = { 
+    { IRP_MJ_CREATE, 0, NULL, TDSPostCreateCallback }, 
+    { IRP_MJ_SET_INFORMATION, 0, TDSPreSetInformationCallback, NULL }, 
+    { IRP_MJ_ACQUIRE_FOR_SECTION_SYNCHRONIZATION, 0, TDSPreAcquireForSectionSynchronizationCallback, NULL },
+    { IRP_MJ_OPERATION_END } 
+};
 CONST FLT_REGISTRATION FilterRegistration = { sizeof(FLT_REGISTRATION), FLT_REGISTRATION_VERSION, 0, NULL, Callbacks, TDSUnloadFilter, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 
 NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument2) {
