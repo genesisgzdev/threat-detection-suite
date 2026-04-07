@@ -1,4 +1,4 @@
-# Threat Detection Suite (TDS) - v5.0.0 (April 2026)
+# Threat Detection Suite (TDS) - v5.0.0
 
 Event-driven Endpoint Detection and Response (EDR) framework for Windows. This suite implements low-level kernel interception and high-fidelity user-mode analysis without relying on polling or expensive system-wide hooks.
 

@@ -5,7 +5,7 @@ All notable changes to the Threat Detection Suite (TDS) project will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [5.0.0] - 2026-04-05
+## [5.0.0]
 
 ### Added
 - **YARA Memory Scanning**: Integrated the YARA engine for high-fidelity scanning of anonymous and private executable memory pages, enabling detection of reflective loading and fileless implants.
