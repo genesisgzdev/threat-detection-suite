@@ -10,30 +10,32 @@ on:
 permissions:
   contents: read
   security-events: write
-  id-token: write
 
 jobs:
-  snyk-code-audit:
+  snyk-code-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Snyk
-        uses: snyk/actions/setup@v3
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      - name: Snyk Code Test
-        run: snyk code test --sarif-file-output=snyk.sarif || true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: snyk.sarif
-        if: always()
+      - name: Snyk SAST
+        run: |
+          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
+            npx --yes snyk code test --token=${{ secrets.SNYK_TOKEN }}
+          else
+            echo "Skipping Snyk: No token provided."
+          fi
 
-  windows-container-check:
+  osv-dependency-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OSV-Scanner
+        run: |
+          docker run --rm -v $(pwd):/src ghcr.io/google/osv-scanner:latest /src -r || true
+
+  windows-build-check:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - name: Build Windows Docker Image
-        run: docker build -t tds-edr-suite .
+      - name: Docker Build (Windows)
+        run: |
+          docker build -t tds-edr-suite .
