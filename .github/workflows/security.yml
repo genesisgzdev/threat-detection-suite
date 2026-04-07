@@ -1,35 +1,40 @@
 name: Security Audit
 
 on:
-  workflow_dispatch: # Disabled automatic triggers due to GitHub account billing lock
-
-permissions:
-  contents: read
-  security-events: write
-  id-token: write
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  snyk-code-audit:
+  snyk-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Snyk
-        uses: snyk/actions/setup@v3
+        uses: snyk/actions/setup@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
       - name: Snyk Code Test
-        run: snyk code test --sarif-file-output=snyk.sarif || true
+        run: snyk code test --sarif-file-output=snyk.sarif
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      - name: Upload SARIF
+
+      - name: Upload Snyk report to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif
         if: always()
 
-  windows-container-check:
-    runs-on: windows-2022
+  osv-scanner:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build Windows Docker Image
-        run: docker build -t tds-edr-suite .
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action/scan@v1
+        with:
+          scan-args: |-
+            --recursive
+            ./
