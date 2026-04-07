@@ -1,4 +1,4 @@
-name: Security Audit
+name: Security Audit 2026
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   security-events: write
 
 jobs:
@@ -16,26 +17,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Snyk SAST
-        run: |
-          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
-            npx --yes snyk code test --token=${{ secrets.SNYK_TOKEN }}
-          else
-            echo "Skipping Snyk: No token provided."
-          fi
+      - name: Setup Snyk
+        uses: snyk/actions/setup@master
+        with:
+          snyk-version: 'latest'
+      - name: Snyk SAST Audit
+        run: snyk code test --sarif-file-output=snyk.sarif
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_OIDC_ENABLED: true
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk.sarif
+        if: always()
 
   osv-dependency-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: OSV-Scanner
-        run: |
-          docker run --rm -v $(pwd):/src ghcr.io/google/osv-scanner:latest /src -r || true
+      - name: Run OSV-Scanner (v2 Syntax)
+        uses: google/osv-scanner-action/v1
+        with:
+          scan-args: "scan source -r ./"
 
   windows-build-check:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Docker Build (Windows)
-        run: |
-          docker build -t tds-edr-suite .
+        run: docker build -t tds-edr-suite .
