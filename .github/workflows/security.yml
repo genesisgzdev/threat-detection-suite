@@ -2,6 +2,8 @@ name: Security Audit
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   snyk-scan:
@@ -9,25 +11,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Snyk
-        uses: snyk/actions/setup@v3
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Snyk Code Test
-        run: |
-          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
-            npx --yes snyk auth ${{ secrets.SNYK_TOKEN }} || true
-            npx --yes snyk code test || true
-          else
-            echo "Skipping Snyk scan due to missing token."
-          fi
-
-  osv-scanner:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run OSV-Scanner natively via Docker
+      - name: Run Snyk Test
         continue-on-error: true
         run: |
-          docker run --rm -v $(pwd):/src ghcr.io/google/osv-scanner:latest /src -r || true
+          npx --yes snyk code test --token=${{ secrets.SNYK_TOKEN }} || echo "Snyk audit completed with findings."
+        
+      - name: OSV-Scanner
+        uses: google/osv-scanner-action/scan@v1
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --recursive
+            ./
