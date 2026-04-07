@@ -18,27 +18,31 @@ SERVICE_STATUS        g_ServiceStatus = {0};
 SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
 HANDLE                g_ServiceStopEvent = INVALID_HANDLE_VALUE;
 
-VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv);
+VOID WINAPI ServiceMain(DWORD argc, LPWSTR *argv);
 VOID WINAPI ServiceCtrlHandler(DWORD);
 DWORD WINAPI ServiceWorkerThread(LPVOID lpParam);
 
 #define SERVICE_NAME L"TDSService"
 
 int wmain(int argc, wchar_t *argv[]) {
-    SERVICE_TABLE_ENTRY ServiceTable[] = {
-        {(LPWSTR)SERVICE_NAME, (LPSERVICE_MAIN_FUNCTION)ServiceMain},
+    UNREFERENCED_PARAMETER(argc);
+    UNREFERENCED_PARAMETER(argv);
+    SERVICE_TABLE_ENTRYW ServiceTable[] = {
+        {(LPWSTR)SERVICE_NAME, (LPSERVICE_MAIN_FUNCTIONW)ServiceMain},
         {NULL, NULL}
     };
 
-    if (StartServiceCtrlDispatcher(ServiceTable) == FALSE) {
+    if (StartServiceCtrlDispatcherW(ServiceTable) == FALSE) {
         return GetLastError();
     }
 
     return 0;
 }
 
-VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv) {
-    g_StatusHandle = RegisterServiceCtrlHandler(SERVICE_NAME, ServiceCtrlHandler);
+VOID WINAPI ServiceMain(DWORD argc, LPWSTR *argv) {
+    UNREFERENCED_PARAMETER(argc);
+    UNREFERENCED_PARAMETER(argv);
+    g_StatusHandle = RegisterServiceCtrlHandlerW(SERVICE_NAME, ServiceCtrlHandler);
 
     if (g_StatusHandle == NULL) return;
 
@@ -87,6 +91,7 @@ public:
      * Dispatches telemetry to Google SecOps (UDM Format).
      */
     static void Dispatch(const TDS::Event& event) {
+        UNREFERENCED_PARAMETER(event);
         // Here we would use the mcp_google-secops_ingest_udm_events tool
         // or a direct REST API call.
         // Format: UDM standard mapping for 2026.
@@ -94,6 +99,7 @@ public:
 };
 
 DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
+    UNREFERENCED_PARAMETER(lpParam);
     TDS::TDSEngine engine;
     engine.Start();
 
@@ -103,7 +109,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     
     if (hDevice != INVALID_HANDLE_VALUE) {
         DWORD bytes;
-        DeviceIoControl(hDevice, IOCTL_TDS_SET_PROTECTION_POLICY, NULL, 0, NULL, 0, &bytes, NULL);
+        DeviceIoControl(hDevice, IOCTL_TDS_SET_PROTECTION_POLICY, NULL, (DWORD)0, NULL, (DWORD)0, &bytes, NULL);
         CloseHandle(hDevice);
     }
 

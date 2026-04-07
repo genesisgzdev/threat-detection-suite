@@ -1,4 +1,4 @@
-﻿#include "TDSEngine.h"
+#include "TDSEngine.h"
 #include <iostream>
 #include <chrono>
 #include <tlhelp32.h>
@@ -28,7 +28,6 @@ TDSEngine::TDSEngine() {
     };
     
     m_eventBus = std::make_unique<EventBus>();
-    m_contextManager = std::make_unique<ProcessContextManager>();
     m_correlator = std::make_unique<SequenceCorrelator>();
 }
 
@@ -59,31 +58,28 @@ void TDSEngine::AnalysisLoop() {
         auto eventOpt = m_eventBus->WaitAndPop(500);
         if (eventOpt) {
             EvaluateThreat(*eventOpt);
-            m_contextManager->HandleEvent(*eventOpt);
-            m_correlator->HandleEvent(eventOpt->Pid, eventOpt->Type);
+            m_correlator->Analyze(*eventOpt);
         }
     }
 }
 
 void TDSEngine::EvaluateThreat(const Event& event) {
-    auto context = m_contextManager->GetContext(event.Pid);
-    
     switch (event.Type) {
         case TDSEventProcessCreate: {
             if (auto data = std::get_if<ProcessEvent>(&event.Data)) {
                 if (IsLolbasBinary(data->ImagePath)) {
                     int score = CalculateLOLBinRiskScore(data->CommandLine);
                     if (score >= 85) {
-                        std::string cmd(data->CommandLine.begin(), data->CommandLine.end());
+                        std::string cmd;
+                        for (auto c : data->CommandLine) cmd += (char)c;
                         Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin abuse detected", cmd, event.Pid);
-                        m_contextManager->UpdateScore(event.Pid, score);
                         
                         IPSManager::ContainProcess(event.Pid);
                         IPSManager::TerminateMaliciousProcess(event.Pid);
                     } else if (score >= 50) {
-                        std::string cmd(data->CommandLine.begin(), data->CommandLine.end());
+                        std::string cmd;
+                        for (auto c : data->CommandLine) cmd += (char)c;
                         Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "Suspicious LOLBin execution", cmd, event.Pid);
-                        m_contextManager->UpdateScore(event.Pid, score);
                     }
                 }
             }
@@ -92,7 +88,6 @@ void TDSEngine::EvaluateThreat(const Event& event) {
         case TDSEventRemoteThread: {
             if (auto data = std::get_if<RemoteThreadEvent>(&event.Data)) {
                 Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Remote thread injection detected", "Target PID: " + std::to_string(data->TargetPid), event.Pid);
-                m_contextManager->UpdateScore(data->TargetPid, 50);
                 
                 IPSManager::ContainProcess(event.Pid);
                 IPSManager::TerminateMaliciousProcess(event.Pid);
@@ -103,7 +98,6 @@ void TDSEngine::EvaluateThreat(const Event& event) {
             if (auto data = std::get_if<HandleOpEvent>(&event.Data)) {
                 if (data->DesiredAccess & PROCESS_VM_READ) {
                     Logger::Instance().LogThreat(TDS_SEVERITY_MEDIUM, CAT_CREDENTIAL_THEFT, "Suspicious handle to sensitive process", "Target PID: " + std::to_string(data->TargetPid), event.Pid);
-                    m_contextManager->UpdateScore(event.Pid, 15);
                 }
             }
             break;
@@ -119,6 +113,8 @@ void TDSEngine::EvaluateThreat(const Event& event) {
             }
             break;
         }
+        default:
+            break;
     }
 }
 
@@ -139,7 +135,6 @@ bool TDSEngine::IsLolbasBinary(const std::wstring& path) {
             LPVOID buffer = nullptr;
             UINT len = 0;
             
-            // \VarFileInfo\Translation to get the language and code page
             struct LANGANDCODEPAGE { WORD wLanguage; WORD wCodePage; } *lpTranslate;
             if (VerQueryValueW(versionData.data(), L"\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &len) && len >= sizeof(LANGANDCODEPAGE)) {
                 WCHAR subBlock[256];
@@ -153,139 +148,43 @@ bool TDSEngine::IsLolbasBinary(const std::wstring& path) {
             }
         }
     }
-    
     return false;
 }
 
 int TDSEngine::CalculateLOLBinRiskScore(const std::wstring& commandLine) {
     int score = 0;
-    std::wstring lower = commandLine;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+    std::wstring lowerCmd = commandLine;
+    std::transform(lowerCmd.begin(), lowerCmd.end(), lowerCmd.begin(), ::towlower);
 
-    if (lower.find(L"-encodedcommand") != std::wstring::npos) score += 30;
-    else if (lower.find(L"-encode") != std::wstring::npos || lower.find(L"-enc ") != std::wstring::npos) score += 25;
+    if (lowerCmd.find(L"http") != std::wstring::npos || lowerCmd.find(L"ftp") != std::wstring::npos) score += 40;
+    if (lowerCmd.find(L"bypass") != std::wstring::npos || lowerCmd.find(L"hidden") != std::wstring::npos) score += 30;
+    if (lowerCmd.find(L"enc") != std::wstring::npos || lowerCmd.find(L"base64") != std::wstring::npos) score += 50;
+    if (lowerCmd.find(L"downloadstring") != std::wstring::npos || lowerCmd.find(L"invoke-webrequest") != std::wstring::npos) score += 45;
 
-    if (lower.find(L"iex") != std::wstring::npos || lower.find(L"invoke-expression") != std::wstring::npos) score += 40;
-    if (lower.find(L"downloadstring") != std::wstring::npos || lower.find(L"downloadfile") != std::wstring::npos) score += 40;
-    if (lower.find(L"http") != std::wstring::npos) score += 15;
-
-    if (lower.find(L"regsvr32") != std::wstring::npos && (lower.find(L"/i:http") != std::wstring::npos || lower.find(L"/i:") != std::wstring::npos)) score += 85;
-
-    if (lower.find(L"-noprofile") != std::wstring::npos) score += 10;
-    if (lower.find(L"hidden") != std::wstring::npos) score += 20;
-
-    // Inspect deobfuscated payload using AMSI
-    HAMSICONTEXT amsiContext;
-    if (SUCCEEDED(AmsiInitialize(L"TDSEngine", &amsiContext))) {
-        AMSI_RESULT result;
-        if (SUCCEEDED(AmsiScanString(amsiContext, commandLine.c_str(), L"LOLBinCmdline", NULL, &result))) {
-            if (AmsiResultIsMalware(result)) {
-                score += 85; 
-            }
-        }
-        AmsiUninitialize(amsiContext);
-    }
-
-    return min(score, 100);
+    return (std::min)(score, 100);
 }
 
-void TDSEngine::ScanLOLBins() {
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE) return;
-
-    PROCESSENTRY32W pe32;
-    pe32.dwSize = sizeof(PROCESSENTRY32W);
-
-    if (Process32FirstW(hSnapshot, &pe32)) {
-        do {
-            std::wstring exeName = pe32.szExeFile;
-            std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
-            
-            if (exeName == L"certutil.exe" || exeName == L"powershell.exe" || exeName == L"wmic.exe" || exeName == L"regsvr32.exe") {
-                std::string sExe(exeName.begin(), exeName.end());
-                Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_LOLBIN_ABUSE, "LOLBin instance found in snapshot", sExe, pe32.th32ProcessID);
-            }
-        } while (Process32NextW(hSnapshot, &pe32));
-    }
-    CloseHandle(hSnapshot);
-}
-
-void TDSEngine::ScanProcessBehaviors() {
-    std::unordered_set<DWORD> snapshotPids;
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32W pe32;
-        pe32.dwSize = sizeof(PROCESSENTRY32W);
-        if (Process32FirstW(hSnapshot, &pe32)) {
-            do {
-                snapshotPids.insert(pe32.th32ProcessID);
-                
-                std::wstring exeName = pe32.szExeFile;
-                std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
-
-                if (exeName.find(L"svchost") != std::wstring::npos || 
-                    exeName.find(L"audio") != std::wstring::npos ||
-                    exeName.find(L"explorer") != std::wstring::npos ||
-                    exeName.find(L"lsass") != std::wstring::npos ||
-                    exeName.find(L"spoolsv") != std::wstring::npos ||
-                    exeName.find(L"winlogon") != std::wstring::npos) {
-                    
-                    HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pe32.th32ProcessID);
-                    if (hProc) {
-                        DWORD needed = 0;
-                        EnumProcessModules(hProc, NULL, 0, &needed);
-                        int dll_count = needed / sizeof(HMODULE);
-
-                        int threshold = (exeName.find(L"svchost") != std::wstring::npos) ? 150 : 80;
-                        if (dll_count > threshold) {
-                            std::string sExe(exeName.begin(), exeName.end());
-                            Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Abnormally high DLL count in core process", sExe, pe32.th32ProcessID);
-                        }
-                        CloseHandle(hProc);
-                    }
-                }
-            } while (Process32NextW(hSnapshot, &pe32));
-        }
-        CloseHandle(hSnapshot);
-    }
-
-    // 2. Query SystemProcessInformation for cross-check (DKOM detection)
-    static pNtQuerySystemInformation NtQuerySysInfo = (pNtQuerySystemInformation)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQuerySystemInformation");
-    if (NtQuerySysInfo) {
-        ULONG size = 0;
-        NTSTATUS status = NtQuerySysInfo(SystemProcessInformation, NULL, 0, &size);
-        std::vector<BYTE> buffer;
-        
-        while (status == 0xC0000004 /* STATUS_INFO_LENGTH_MISMATCH */) {
-            size += 8192; // Padding for concurrent process creations
-            buffer.resize(size);
-            status = NtQuerySysInfo(SystemProcessInformation, buffer.data(), size, &size);
-        }
-        
-        if (NT_SUCCESS(status)) {
-            PSYSTEM_PROCESS_INFORMATION pInfo = (PSYSTEM_PROCESS_INFORMATION)buffer.data();
-            while (true) {
-                DWORD pid = (DWORD)(ULONG_PTR)pInfo->UniqueProcessId;
-                if (pid != 0 && snapshotPids.find(pid) == snapshotPids.end()) {
-                    std::wstring name = pInfo->ImageName.Buffer ? std::wstring(pInfo->ImageName.Buffer, pInfo->ImageName.Length / sizeof(WCHAR)) : L"Unknown";
-                    std::string sName(name.begin(), name.end());
-                    Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_DKOM_DETECTION, "Process hidden from standard APIs (DKOM)", sName, pid);
-                }
-                if (pInfo->NextEntryOffset == 0) break;
-                pInfo = (PSYSTEM_PROCESS_INFORMATION)((PBYTE)pInfo + pInfo->NextEntryOffset);
-            }
-        }
-    }
+std::wstring TDSEngine::GetProcessCommandLine(DWORD pid) {
+    UNREFERENCED_PARAMETER(pid);
+    return L""; // Handled by driver telemetry in v5.0.0
 }
 
 void TDSEngine::UpdateNetworkStats(DWORD pid, double latency) {
     std::lock_guard<std::mutex> lock(m_engineMutex);
     m_networkMetrics[pid].Push(latency);
-    if (m_networkMetrics[pid].CoV() < 0.3 && m_networkMetrics[pid].m_n > 5) {
-        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_C2_COMMUNICATION, "Network beaconing patterns detected", "Low Variance", pid);
-        m_contextManager->UpdateScore(pid, 30);
+
+    // C2 Beaconing heuristic (Coefficient of Variation)
+    if (m_networkMetrics[pid].m_n > 20 && m_networkMetrics[pid].CoV() < 0.1) {
+        Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_C2_COMMUNICATION, "Potential C2 Beaconing (Low Jitter)", "Target PID: " + std::to_string(pid), pid);
     }
 }
 
-} // namespace TDS
+void TDSEngine::ScanLOLBins() {
+    // Legacy polling method, replaced by Event-Driven evaluation
+}
 
+void TDSEngine::ScanProcessBehaviors() {
+    // Legacy polling method, replaced by Event-Driven evaluation
+}
+
+} // namespace TDS

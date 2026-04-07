@@ -8,9 +8,16 @@
 #include "../TDSEngine/ips/IPSManager.h"
 
 #pragma comment(lib, "ntdll.lib")
-#pragma comment(lib, "yara.lib")
 
 namespace TDS {
+
+static std::string WStringToString(const std::wstring& wstr) {
+    if (wstr.empty()) return "";
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
 
 YR_RULES* MemoryScanner::s_yaraRules = nullptr;
 
@@ -167,7 +174,7 @@ void MemoryScanner::ScanProcessHooks(HANDLE hProcess) {
 
                                                 if (memBuffer[b] != diskBuffer[b]) {
                                                     // ANY non-relocation change is a guaranteed modification (Hook/Patch)
-                                                    std::string sModName(modNameStr.begin(), modNameStr.end());
+                                                    std::string sModName = WStringToString(modNameStr);
                                                     Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_HOOK_DETECTION, 
                                                         "Deep Inline/Mid-function Hook detected: Unrelocated memory-disk byte mismatch", sModName, GetProcessId(hProcess));
                                                     break; // Alert once per section to avoid flood
@@ -272,7 +279,7 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
                 }
 
                 if (DetectNopSleds(hProcess, mbi.BaseAddress, mbi.RegionSize)) {
-                    std::string sName(processName.begin(), processName.end());
+                    std::string sName = WStringToString(processName);
                     Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_MEMORY_ANOMALY, "Shellcode NOP sled in RWX region", sName, pid);
                 }
 
@@ -314,9 +321,8 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
     pNtQueryInformationProcess NtQueryInformationProcess = (pNtQueryInformationProcess)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
     
     if (NtQueryInformationProcess && NT_SUCCESS(NtQueryInformationProcess(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL))) {
-        PEB peb;
-        if (ReadProcessMemory(hProcess, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) {
-            LPVOID imageBase = peb.ImageBaseAddress;
+        LPVOID imageBase = NULL;
+        if (ReadProcessMemory(hProcess, (PBYTE)pbi.PebBaseAddress + (sizeof(PVOID) == 8 ? 0x10 : 0x08), &imageBase, sizeof(imageBase), NULL)) {
             
             // 2. Architecture-Agnostic PE Header Parsing (WOW64 Safe)
             IMAGE_DOS_HEADER dosHeader;
@@ -337,7 +343,7 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
                                         MEMORY_BASIC_INFORMATION mbi;
                                         if (VirtualQueryEx(hProcess, (PBYTE)imageBase + sec.VirtualAddress, &mbi, sizeof(mbi))) {
                                             if (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_WRITECOPY) {
-                                                std::string sName(processName.begin(), processName.end());
+                                                std::string sName = WStringToString(processName);
                                                 Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PROCESS_BEHAVIOR, 
                                                     "Process Hollowing: .text section has modified RWX/WriteCopy permissions", sName, GetProcessId(hProcess));
                                             }
@@ -358,7 +364,7 @@ void MemoryScanner::DetectProcessHollowing(HANDLE hProcess, const std::wstring& 
                                     IMAGE_FILE_HEADER diskFileHeader;
                                     if (ReadFile(hFile, &diskFileHeader, sizeof(diskFileHeader), &read, NULL)) {
                                         if (memoryTimeStamp != diskFileHeader.TimeDateStamp) {
-                                            std::string sName(processName.begin(), processName.end());
+                                            std::string sName = WStringToString(processName);
                                             Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PROCESS_BEHAVIOR, 
                                                 "Process Hollowing detected: Memory TimeDateStamp mismatch", sName, GetProcessId(hProcess));
                                         }

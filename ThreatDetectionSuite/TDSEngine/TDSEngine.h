@@ -11,7 +11,6 @@
 #include "../TDSCommon/TDSCommon.h"
 #include "../TDSCommon/TDSEvents.h"
 #include "EventBus.h"
-#include "ProcessContextManager.h"
 #include "correlator/SequenceCorrelator.h"
 
 namespace TDS {
@@ -79,7 +78,6 @@ private:
     std::map<DWORD, BeaconMetrics> m_networkMetrics;
     
     std::unique_ptr<EventBus> m_eventBus;
-    std::unique_ptr<ProcessContextManager> m_contextManager;
     std::unique_ptr<SequenceCorrelator> m_correlator;
     
     std::thread m_analysisThread;

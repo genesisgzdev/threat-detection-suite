@@ -23,7 +23,7 @@ struct TDS_USER_METRICS {
 
 #pragma pack(push, 1)
 
-#define TDS_DEVICE_TYPE 0x8000
+#define TDS_DEVICE_TYPE (unsigned long)0x8000
 
 #define IOCTL_TDS_GET_NEXT_EVENT \
     CTL_CODE(TDS_DEVICE_TYPE, 0x810, METHOD_BUFFERED, FILE_ANY_ACCESS)

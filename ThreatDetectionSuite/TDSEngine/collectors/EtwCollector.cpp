@@ -1,9 +1,15 @@
-﻿#include "EtwCollector.h"
-#include <iostream>
-#include <system_error>
-#include <vector>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <evntrace.h>
 #include <tdh.h>
+#include <iostream>
+#include <vector>
+#include "EtwCollector.h"
+
 #pragma comment(lib, "tdh.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace TDS {
 
@@ -26,7 +32,6 @@ void EtwCollector::SetEventCallback(EventCallback cb) {
 bool EtwCollector::Start(const std::vector<EtwProvider>& providers) {
     if (m_active) return true;
 
-    // Verify necessary privileges for ETW
     HANDLE hToken;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
         LUID luid;
@@ -35,25 +40,22 @@ bool EtwCollector::Start(const std::vector<EtwProvider>& providers) {
             tp.PrivilegeCount = 1;
             tp.Privileges[0].Luid = luid;
             tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-            if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL, NULL)) {
-                std::cerr << "[!] Warning: Failed to enable SE_SYSTEM_PROFILE_NAME. ETW might fail." << std::endl;
-            }
+            AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL, NULL);
         }
         CloseHandle(hToken);
     }
 
-    ULONG bufferSize = sizeof(EVENT_TRACE_LOG_PROPERTIES) + (m_sessionName.length() + 1) * sizeof(WCHAR) + 1024;
-    EVENT_TRACE_LOG_PROPERTIES* pProperties = (EVENT_TRACE_LOG_PROPERTIES*)malloc(bufferSize);
+    ULONG bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + (ULONG)((m_sessionName.length() + 1) * sizeof(WCHAR)) + 1024;
+    EVENT_TRACE_PROPERTIES* pProperties = (EVENT_TRACE_PROPERTIES*)malloc(bufferSize);
     if (!pProperties) return false;
 
     RtlZeroMemory(pProperties, bufferSize);
     pProperties->Wnode.BufferSize = bufferSize;
     pProperties->Wnode.Flags = WNODE_FLAG_TRACED_GUID;
-    pProperties->Wnode.ClientContext = 1; // QPC
+    pProperties->Wnode.ClientContext = 1; 
     pProperties->LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
-    pProperties->LoggerNameOffset = sizeof(EVENT_TRACE_LOG_PROPERTIES);
+    pProperties->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
 
-    // Stop existing session if any
     ControlTraceW(0, m_sessionName.c_str(), pProperties, EVENT_TRACE_CONTROL_STOP);
 
     ULONG status = StartTraceW(&m_hSession, m_sessionName.c_str(), pProperties);
@@ -74,10 +76,8 @@ bool EtwCollector::Start(const std::vector<EtwProvider>& providers) {
 
     m_hTrace = OpenTraceW(&logFile);
     if (m_hTrace == INVALID_PROCESSTRACE_HANDLE) {
-        // Prevent Kernel memory leak by stopping the orphaned session
         ControlTraceW(m_hSession, m_sessionName.c_str(), pProperties, EVENT_TRACE_CONTROL_STOP);
         free(pProperties);
-        Stop();
         return false;
     }
 
@@ -93,13 +93,12 @@ void EtwCollector::Stop() {
     m_active = false;
 
     if (m_hSession) {
-        ULONG bufferSize = sizeof(EVENT_TRACE_LOG_PROPERTIES) + (m_sessionName.length() + 1) * sizeof(WCHAR);
-        EVENT_TRACE_LOG_PROPERTIES* pProperties = (EVENT_TRACE_LOG_PROPERTIES*)malloc(bufferSize);
+        ULONG bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + (ULONG)((m_sessionName.length() + 1) * sizeof(WCHAR));
+        EVENT_TRACE_PROPERTIES* pProperties = (EVENT_TRACE_PROPERTIES*)malloc(bufferSize);
         if (pProperties) {
             RtlZeroMemory(pProperties, bufferSize);
             pProperties->Wnode.BufferSize = bufferSize;
-            pProperties->Wnode.Guid = {0};
-            pProperties->LoggerNameOffset = sizeof(EVENT_TRACE_LOG_PROPERTIES);
+            pProperties->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
             ControlTraceW(m_hSession, m_sessionName.c_str(), pProperties, EVENT_TRACE_CONTROL_STOP);
             free(pProperties);
         }
@@ -117,65 +116,13 @@ void EtwCollector::Stop() {
 }
 
 void EtwCollector::ProcessLoop() {
-    ULONG status = ProcessTrace(&m_hTrace, 1, 0, 0);
-    if (status != ERROR_SUCCESS && status != ERROR_CANCELLED) {
-        std::cerr << "[-] ProcessTrace failed: " << status << std::endl;
-    }
+    ProcessTrace(&m_hTrace, 1, NULL, NULL);
 }
 
 void WINAPI EtwCollector::EventRecordCallback(PEVENT_RECORD pEvent) {
     if (s_instance && s_instance->m_callback) {
-        // TdhGetEventInformation implementation to parse payload
-        DWORD bufferSize = 0;
-        DWORD status = TdhGetEventInformation(pEvent, 0, nullptr, nullptr, &bufferSize);
-        if (status == ERROR_INSUFFICIENT_BUFFER) {
-            PTRACE_EVENT_INFO pInfo = (PTRACE_EVENT_INFO)malloc(bufferSize);
-            if (pInfo) {
-                status = TdhGetEventInformation(pEvent, 0, nullptr, pInfo, &bufferSize);
-                if (status == ERROR_SUCCESS) {
-                    for (ULONG i = 0; i < pInfo->TopLevelPropertyCount; i++) {
-                        std::wstring propName = (LPWSTR)((PBYTE)pInfo + pInfo->EventPropertyInfoArray[i].NameOffset);
-                        
-                        PROPERTY_DATA_DESCRIPTOR dataDesc;
-                        dataDesc.PropertyName = (ULONGLONG)((PBYTE)pInfo + pInfo->EventPropertyInfoArray[i].NameOffset);
-                        dataDesc.ArrayIndex = ULONG_MAX;
-                        
-                        DWORD propSize = 0;
-                        if (TdhGetPropertySize(pEvent, 0, nullptr, 1, &dataDesc, &propSize) == ERROR_SUCCESS && propSize > 0) {
-                            std::vector<BYTE> propData(propSize);
-                            if (TdhGetProperty(pEvent, 0, nullptr, 1, &dataDesc, propSize, propData.data()) == ERROR_SUCCESS) {
-                                PEVENT_PROPERTY_INFO propInfo = &pInfo->EventPropertyInfoArray[i];
-                                DWORD formattedSize = 0;
-                                USHORT userDataLen = (USHORT)propSize;
-                                
-                                status = TdhFormatProperty(
-                                    pInfo, NULL, 8, 
-                                    propInfo->nonStructType.InType, propInfo->nonStructType.OutType,
-                                    userDataLen, (USHORT)propSize, propData.data(), &formattedSize, NULL, &userDataLen
-                                );
-                                
-                                if (status == ERROR_INSUFFICIENT_BUFFER) {
-                                    std::vector<WCHAR> formattedData(formattedSize / sizeof(WCHAR));
-                                    status = TdhFormatProperty(
-                                        pInfo, NULL, 8, 
-                                        propInfo->nonStructType.InType, propInfo->nonStructType.OutType,
-                                        userDataLen, (USHORT)propSize, propData.data(), &formattedSize, formattedData.data(), &userDataLen
-                                    );
-                                    if (status == ERROR_SUCCESS) {
-                                        // Real telemetry extracted: property name and formatted value available here
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                free(pInfo);
-            }
-        }
-        
         s_instance->m_callback(pEvent);
     }
 }
 
 } // namespace TDS
-

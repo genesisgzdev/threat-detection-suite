@@ -1,4 +1,4 @@
-﻿#include "PersistenceDetector.h"
+#include "PersistenceDetector.h"
 #include <wbemidl.h>
 #include <taskschd.h>
 #include <comdef.h>
@@ -15,6 +15,15 @@
 namespace TDS {
 
 using Microsoft::WRL::ComPtr;
+
+// Professional Narrow/Wide string conversion
+static std::string WStringToString(const std::wstring& wstr) {
+    if (wstr.empty()) return "";
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
 
 void PersistenceDetector::ScanWmiSubscriptions() {
     ComPtr<IWbemLocator> pLoc;
@@ -46,16 +55,13 @@ void PersistenceDetector::ScanWmiSubscriptions() {
                 if (0 == uReturn) break;
 
                 VARIANT vtProp;
-                // Get Name or CommandLineTemplate depending on the class
                 if (SUCCEEDED(pclsObj->Get(L"Name", 0, &vtProp, 0, 0)) && vtProp.vt == VT_BSTR) {
-                    std::wstring name = vtProp.bstrVal;
-                    std::string sName(name.begin(), name.end());
-                    std::string className(wmiClass.begin(), wmiClass.end());
+                    std::string sName = WStringToString(vtProp.bstrVal);
+                    std::string className = WStringToString(wmiClass);
                     Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_PERSISTENCE, "WMI Persistence Object: " + className, sName, 0);
                     VariantClear(&vtProp);
                 } else if (SUCCEEDED(pclsObj->Get(L"CommandLineTemplate", 0, &vtProp, 0, 0)) && vtProp.vt == VT_BSTR) {
-                    std::wstring cmd = vtProp.bstrVal;
-                    std::string sCmd(cmd.begin(), cmd.end());
+                    std::string sCmd = WStringToString(vtProp.bstrVal);
                     Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PERSISTENCE, "WMI CommandLine Consumer", sCmd, 0);
                     VariantClear(&vtProp);
                 }
@@ -114,8 +120,9 @@ void PersistenceDetector::ScanScheduledTasks() {
                                                     lowerPath.find(L"mshta.exe") != std::wstring::npos ||
                                                     lowerPath.find(L"regsvr32.exe") != std::wstring::npos) {
                                                     
-                                                    std::string fullCmd = std::string(path.begin(), path.end()) + " " + std::string(args.begin(), args.end());
-                                                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "LOLBin Scheduled Task Execution", fullCmd, 0);
+                                                    std::string sPath = WStringToString(path);
+                                                    std::string sArgs = WStringToString(args);
+                                                    Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_LOLBIN_ABUSE, "LOLBin Scheduled Task Execution", sPath + " " + sArgs, 0);
                                                 }
                                                 
                                                 if (bPath) SysFreeString(bPath);
@@ -175,12 +182,12 @@ void PersistenceDetector::ScanDirectory(const std::wstring& directory, int depth
                 bool isSystem = (findData.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) != 0;
 
                 if (isHidden && isSystem) {
-                    std::string fPath(fullPath.begin(), fullPath.end());
+                    std::string fPath = WStringToString(fullPath);
                     Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PERSISTENCE, "Hidden+System file detected in temp/system dir", fPath, 0);
                 }
 
                 if (Entropy::IsFileHighEntropy(fullPath)) {
-                    std::string fPath(fullPath.begin(), fullPath.end());
+                    std::string fPath = WStringToString(fullPath);
                     Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_PERSISTENCE, "High entropy persistence file detected", fPath, 0);
                 }
             }
@@ -191,4 +198,3 @@ void PersistenceDetector::ScanDirectory(const std::wstring& directory, int depth
 }
 
 } // namespace TDS
-

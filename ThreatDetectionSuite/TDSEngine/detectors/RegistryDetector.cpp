@@ -1,4 +1,4 @@
-﻿#include "RegistryDetector.h"
+#include "RegistryDetector.h"
 #include <iostream>
 #include <algorithm>
 #include <wintrust.h>
@@ -11,6 +11,15 @@
 #pragma comment(lib, "shell32.lib")
 
 namespace TDS {
+
+// Professional Narrow/Wide string conversion
+static std::string WStringToString(const std::wstring& wstr) {
+    if (wstr.empty()) return "";
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
 
 void RegistryDetector::ScanAutoRunKeys() {
     const std::vector<std::wstring> runKeys = {
@@ -55,8 +64,8 @@ void RegistryDetector::ScanCOMHijacking() {
                     if (isShadowing) RegCloseKey(hLmKey);
 
                     if (isMalicious || isShadowing) {
-                        std::string sPath(path.begin(), path.end());
-                        std::string sClsid(subKeyName, subKeyName + wcslen(subKeyName));
+                        std::string sPath = WStringToString(path);
+                        std::string sClsid = WStringToString(subKeyName);
                         std::string msg = isShadowing ? "Potential COM Hijack: HKCU entry shadowing HKLM" : "COM Hijacking detected in HKCU (Malicious Path)";
                         Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, msg + ": " + sClsid, sPath, 0);
                     }
@@ -80,7 +89,7 @@ void RegistryDetector::ScanAppInitDLLs() {
         if (RegQueryValueExW(hKey, L"AppInit_DLLs", NULL, &type, (LPBYTE)value, &size) == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ)) {
             std::wstring dlls(value);
             if (!dlls.empty()) {
-                std::string sDlls(dlls.begin(), dlls.end());
+                std::string sDlls = WStringToString(dlls);
                 Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, "AppInit_DLLs is set", sDlls, 0);
             }
         }
@@ -184,8 +193,8 @@ void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {
                 }
                 
                 if (IsMaliciousPath(path)) {
-                    std::string desc = "Unsigned/Revoked binary in AutoRun registry: " + std::string(subKey.begin(), subKey.end());
-                    std::string ioc = std::string(path.begin(), path.end());
+                    std::string desc = "Unsigned/Revoked binary in AutoRun registry: " + WStringToString(subKey);
+                    std::string ioc = WStringToString(path);
                     Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_REGISTRY_ANOMALY, desc, ioc, 0);
                 }
             }
@@ -201,4 +210,3 @@ void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {
 }
 
 } // namespace TDS
-

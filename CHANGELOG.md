@@ -5,9 +5,10 @@ All notable changes to the Threat Detection Suite (TDS) project will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [5.0.0] - 2026-04-06
+## [5.0.0] - 2026-04-05
 
 ### Added
+- **YARA Memory Scanning**: Integrated the YARA engine for high-fidelity scanning of anonymous and private executable memory pages, enabling detection of reflective loading and fileless implants.
 - **Event-Driven Architecture**: Transitioned the user-mode/kernel-mode communication from synchronous polling to an asynchronous inverted call model via `IOCTL_TDS_GET_NEXT_EVENT`.
 - **Network Interception**: Implemented Windows Filtering Platform (WFP) callouts at the ALE Auth Connect and Datagram Data layers (`FWPM_LAYER_ALE_AUTH_CONNECT_V4/V6`, `FWPM_LAYER_DATAGRAM_DATA_V4/V6`) for native network metadata extraction.
 - **Self-Protection Mechanisms**: Integrated `ObRegisterCallbacks` to intercept and strip unauthorized access rights (`PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `THREAD_SET_CONTEXT`) targeting the EDR process and threads.
