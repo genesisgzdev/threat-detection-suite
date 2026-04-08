@@ -1,4 +1,4 @@
-﻿#include <ntifs.h>
+#include <ntifs.h>
 #include <ntddk.h>
 #include <fltKernel.h>
 #include <fwpsk.h>
@@ -84,6 +84,76 @@ BOOLEAN IsLsass(PEPROCESS Process) {
         ExFreePool(procName);
     }
     return match;
+}
+
+// performant entropy calculation using a pre-calculated log table approximation
+// Shannon Entropy: H = -Sum(Pi * log2(Pi))
+static double CalculateBufferEntropy(PUCHAR Buffer, ULONG Length) {
+    if (Length == 0) return 0.0;
+    ULONG count[256] = { 0 };
+    for (ULONG i = 0; i < Length; i++) count[Buffer[i]]++;
+
+    double entropy = 0.0;
+    for (int i = 0; i < 256; i++) {
+        if (count[i] > 0) {
+            double p = (double)count[i] / Length;
+            // Use a simple approximation: log2(x) = ln(x) / ln(2)
+            // Note: In kernel we use floating point carefully with KeSaveExtendedProcessorState
+            entropy -= p * (log(p) / 0.69314718056); 
+        }
+    }
+    return entropy;
+}
+
+FLT_PREOP_CALLBACK_STATUS TDSPreWriteCallback(_Inout_ PFLT_CALLBACK_DATA Data, _In_ PCFLT_RELATED_OBJECTS FltObjects, _Outptr_opt_ PVOID *CompletionContext) {
+    UNREFERENCED_PARAMETER(FltObjects);
+    UNREFERENCED_PARAMETER(CompletionContext);
+
+    if (Data->RequestorMode == KernelMode) return FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    ULONG length = Data->Iopb->Parameters.Write.Length;
+    if (length < 4096) return FLT_PREOP_SUCCESS_NO_CALLBACK; // Skip small writes for performance
+
+    PVOID buffer = NULL;
+    if (Data->Iopb->Parameters.Write.MdlAddress) {
+        buffer = MmGetSystemAddressForMdlSafe(Data->Iopb->Parameters.Write.MdlAddress, NormalPagePriority | MdlMappingNoExecute);
+    } else {
+        buffer = Data->Iopb->Parameters.Write.WriteBuffer;
+    }
+
+    if (buffer) {
+        KFLOATING_SAVE saveState;
+        if (NT_SUCCESS(KeSaveExtendedProcessorState(XSTATE_MASK_LEGACY, &saveState))) {
+            double entropy = CalculateBufferEntropy((PUCHAR)buffer, length);
+            KeRestoreExtendedProcessorState(&saveState);
+
+            if (entropy > 7.5) { // Threshold for encrypted/compressed data
+                PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
+                if (NT_SUCCESS(FltGetFileNameInformation(Data, FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT, &nameInfo))) {
+                    FltParseFileNameInformation(nameInfo);
+                    ULONG pathLen = nameInfo->Name.Length;
+                    ULONG dataSize = sizeof(TDS_FILE_EVENT_DATA) + pathLen;
+                    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
+                    if (item) {
+                        RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
+                        PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1);
+                        h->Type = TDSEventRansomwareActivity; 
+                        h->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+                        h->DataSize = dataSize; 
+                        KeQuerySystemTimePrecise((PLARGE_INTEGER)&h->Timestamp);
+                        PTDS_FILE_EVENT_DATA f = (PTDS_FILE_EVENT_DATA)(h + 1); 
+                        f->Operation = 5; // Entropy Alert
+                        f->FilePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_FILE_EVENT_DATA);
+                        RtlCopyMemory((PUCHAR)h + f->FilePathOffset, nameInfo->Name.Buffer, pathLen);
+                        QueueTDSEvent(item);
+                    }
+                    FltReleaseFileNameInformation(nameInfo);
+                }
+            }
+        }
+    }
+
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
 
 VOID CancelPendingIrp(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
@@ -476,7 +546,7 @@ NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument
         ULONG dataSize = sizeof(TDS_REGISTRY_EVENT_DATA) + keyPath.Length + valueNameLen + dataBufSize;
         PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
         if (item) {
-            RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
+            RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize); item->TotalSize = sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize;
             PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
             header->Type = (notifyClass == RegNtPreSetValueKey) ? TDSEventRegistrySet : (notifyClass == RegNtPreDeleteKey || notifyClass == RegNtPreDeleteValueKey) ? TDSEventRegistryDelete : TDSEventRegistryRename;
             header->ProcessId = HandleToUlong(PsGetCurrentProcessId()); header->DataSize = dataSize; KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
@@ -484,7 +554,7 @@ NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument
             PUCHAR buffer = (PUCHAR)(regData + 1);
             if (keyPath.Length > 0) { regData->KeyPathOffset = (ULONG)(buffer - (PUCHAR)header); RtlCopyMemory(buffer, keyPath.Buffer, keyPath.Length); buffer += keyPath.Length; }
             if (valueNameLen > 0) { regData->ValueNameOffset = (ULONG)(buffer - (PUCHAR)header); RtlCopyMemory(buffer, info->ValueName->Buffer, valueNameLen); buffer += valueNameLen; }
-            if (dataBufSize > 0) { regData->DataOffset = (ULONG)(buffer - (PUCHAR)header); RtlCopyMemory(buffer, info->Data, dataBufSize); }
+            if (dataBufSize > 0) { regData->KeyPathOffset = (ULONG)(buffer - (PUCHAR)header); RtlCopyMemory(buffer, info->Data, dataBufSize); }
             QueueTDSEvent(item);
         }
         if (nameInfo) ExFreePoolWithTag(nameInfo, 'SDTe');
@@ -593,8 +663,64 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     IoCompleteRequest(Irp, IO_NO_INCREMENT); return Irp->IoStatus.Status;
 }
 
+static BOOLEAN IsVssDeletionAttempt(PCUNICODE_STRING CommandLine) {
+    if (!CommandLine || CommandLine->Length == 0) return FALSE;
+
+    // Common ransomware patterns for deleting shadow copies
+    // vssadmin.exe delete shadows /all /quiet
+    // wmic shadowcopy delete
+    // bcdedit /set {default} recoveryenabled No
+    // wbadmin delete catalog -quiet
+    static const PCWSTR patterns[] = {
+        L"delete shadows",
+        L"shadowcopy delete",
+        L"recoveryenabled no",
+        L"delete catalog",
+        L"resize-storageshed"
+    };
+
+    for (int i = 0; i < 5; i++) {
+        UNICODE_STRING patternStr;
+        RtlInitUnicodeString(&patternStr, patterns[i]);
+        if (RtlFindUnicodeStringInUnicodeString(CommandLine, &patternStr, TRUE) != NULL) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo) {
-    UNREFERENCED_PARAMETER(Process); ULONG imgLen = (CreateInfo && CreateInfo->ImageFileName) ? CreateInfo->ImageFileName->Length : 0;
+    UNREFERENCED_PARAMETER(Process); 
+    
+    if (CreateInfo) {
+        // VSS Protection Logic
+        if (IsVssDeletionAttempt(CreateInfo->CommandLine)) {
+            CreateInfo->CreationStatus = STATUS_ACCESS_DENIED;
+            
+            // Log the attempt
+            ULONG imgLen = CreateInfo->ImageFileName ? CreateInfo->ImageFileName->Length : 0;
+            ULONG dataSize = sizeof(TDS_PROCESS_EVENT_DATA) + imgLen;
+            PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
+            if (item) {
+                RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize);
+                PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1);
+                h->Type = TDSEventVssDeletion;
+                h->ProcessId = HandleToUlong(ProcessId);
+                h->DataSize = dataSize;
+                KeQuerySystemTimePrecise((PLARGE_INTEGER)&h->Timestamp);
+                PTDS_PROCESS_EVENT_DATA p = (PTDS_PROCESS_EVENT_DATA)(h + 1);
+                p->Create = TRUE;
+                if (imgLen > 0) {
+                    p->ImagePathOffset = sizeof(TDS_EVENT_HEADER) + sizeof(TDS_PROCESS_EVENT_DATA);
+                    RtlCopyMemory((PUCHAR)h + p->ImagePathOffset, CreateInfo->ImageFileName->Buffer, imgLen);
+                }
+                QueueTDSEvent(item);
+            }
+            return;
+        }
+    }
+
+    ULONG imgLen = (CreateInfo && CreateInfo->ImageFileName) ? CreateInfo->ImageFileName->Length : 0;
     ULONG cmdLen = (CreateInfo && CreateInfo->CommandLine) ? CreateInfo->CommandLine->Length : 0;
     ULONG dataSize = sizeof(TDS_PROCESS_EVENT_DATA) + imgLen + cmdLen;
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + dataSize, 'SDTe');
@@ -633,5 +759,3 @@ void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIM
     if (imgLen > 0) { iEvent->ImagePathOffset = (ULONG)((PUCHAR)(iEvent + 1) - (PUCHAR)header); RtlCopyMemory(iEvent + 1, FullImageName->Buffer, imgLen); }
     QueueTDSEvent(item);
 }
-
-
