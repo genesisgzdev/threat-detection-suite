@@ -51,7 +51,8 @@ typedef enum _TDS_EVENT_TYPE {
     TDSEventRegistryDelete = 14,
     TDSEventRegistryRename = 15,
     TDSEventApcInjection = 16,
-    TDSEventEarlyBirdInjection = 17
+    TDSEventEarlyBirdInjection = 17,
+    TDSEventGhostingAttempt = 18
 } TDS_EVENT_TYPE;
 
 typedef enum _TDS_THREAT_SEVERITY {
@@ -114,29 +115,27 @@ typedef struct _TDS_EVENT_HEADER {
     uint64_t Timestamp;
     uint32_t ProcessId;
     uint32_t ThreadId;
-    TDSEventApcInjection = 16,
-    TDSEventEarlyBirdInjection = 17,
-    TDSEventGhostingAttempt = 18
-    } TDS_EVENT_TYPE;
+    uint32_t DataSize; 
+} TDS_EVENT_HEADER, *PTDS_EVENT_HEADER;
 
-    typedef struct _TDS_PROCESS_EVENT_DATA {
+typedef struct _TDS_PROCESS_EVENT_DATA {
     uint32_t ParentProcessId;
     uint8_t Create;
     uint32_t ImagePathOffset;
     uint32_t CommandLineOffset;
-    } TDS_PROCESS_EVENT_DATA, *PTDS_PROCESS_EVENT_DATA;
+} TDS_PROCESS_EVENT_DATA, *PTDS_PROCESS_EVENT_DATA;
 
-    typedef struct _TDS_IMAGE_LOAD_DATA {
+typedef struct _TDS_IMAGE_LOAD_DATA {
     uint64_t LoadAddress;
     uint64_t ImageSize;
     uint32_t ImagePathOffset;
-    } TDS_IMAGE_LOAD_DATA, *PTDS_IMAGE_LOAD_DATA;
+} TDS_IMAGE_LOAD_DATA, *PTDS_IMAGE_LOAD_DATA;
 
-    typedef struct _TDS_FILE_EVENT_DATA {
+typedef struct _TDS_FILE_EVENT_DATA {
     uint8_t Operation; // 1: Create, 2: Delete, 3: Rename, 4: Ghosting Attempt
     uint32_t FilePathOffset;
     uint32_t TargetPathOffset; 
-    } TDS_FILE_EVENT_DATA, *PTDS_FILE_EVENT_DATA;
+} TDS_FILE_EVENT_DATA, *PTDS_FILE_EVENT_DATA;
 typedef struct _TDS_HANDLE_OP_DATA {
     uint32_t TargetProcessId;
     uint32_t DesiredAccess;
