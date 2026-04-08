@@ -1,13 +1,11 @@
 #include "RegistryDetector.h"
 #include <iostream>
 #include <algorithm>
-#include <wintrust.h>
-#include <softpub.h>
 #include <vector>
 #include <shellapi.h>
+#include "SignatureVerifier.h"
 #include "../Logger.h"
 
-#pragma comment(lib, "wintrust.lib")
 #pragma comment(lib, "shell32.lib")
 
 namespace TDS {
@@ -112,46 +110,14 @@ bool RegistryDetector::IsMaliciousPath(const std::wstring& path) {
 
     std::wstring lowerPath = targetPath;
     std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+    
+    // Whitelist known-good entries if necessary (simplified)
     if (lowerPath.find(L"putty.exe") != std::wstring::npos || lowerPath.find(L"notepad++.exe") != std::wstring::npos) {
         return false;
     }
 
-    WINTRUST_FILE_INFO fileData;
-    ZeroMemory(&fileData, sizeof(fileData));
-    fileData.cbStruct = sizeof(WINTRUST_FILE_INFO);
-    fileData.pcwszFilePath = targetPath.c_str();
-    fileData.hFile = NULL;
-    fileData.pgKnownSubject = NULL;
-
-    WINTRUST_DATA trustData;
-    ZeroMemory(&trustData, sizeof(trustData));
-    trustData.cbStruct = sizeof(WINTRUST_DATA);
-    trustData.pPolicyCallbackData = NULL;
-    trustData.pSIPClientData = NULL;
-    trustData.dwUIChoice = WTD_UI_NONE;
-    
-    trustData.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN; 
-    
-    trustData.dwUnionChoice = WTD_CHOICE_FILE;
-    trustData.dwStateAction = WTD_STATEACTION_VERIFY;
-    trustData.hWVTStateData = NULL;
-    trustData.pwszURLReference = NULL;
-    trustData.dwUIContext = 0;
-    trustData.pFile = &fileData;
-
-    GUID policyGUID = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-
-    LONG status = WinVerifyTrust(NULL, &policyGUID, &trustData);
-    
-    trustData.dwStateAction = WTD_STATEACTION_CLOSE;
-    WinVerifyTrust(NULL, &policyGUID, &trustData);
-
-    if (status != ERROR_SUCCESS) {
-        // Not trusted / unsigned / revoked
-        return true;
-    }
-
-    return false;
+    // Industrial Verification: Authenticode
+    return !VerifyAuthenticode(targetPath);
 }
 
 void RegistryDetector::ScanKey(HKEY hKeyRoot, const std::wstring& subKey) {

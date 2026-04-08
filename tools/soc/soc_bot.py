@@ -88,9 +88,29 @@ if __name__ == "__main__":
     reporter.initialize_clients() # We proceed even if false, to use DLQ
     
     try:
+        if len(sys.argv) < 2:
+            print("Usage: soc_bot.py <json_payload_or_path>")
+            sys.exit(1)
+
         input_data = sys.argv[1]
-        if os.path.exists(input_data):
-            with open(input_data, 'r') as f:
+        
+        # Security Hardening: Prevent Path Traversal (Finding ID: bedeaea4-b580-4f01-b800-5eed43512489)
+        if os.path.isfile(input_data):
+            # Normalize and validate path
+            abs_path = os.path.abspath(input_data)
+            # Only allow reading from ProgramData/TDS or current tools/soc directory
+            allowed_dirs = [
+                os.path.abspath("C:\\ProgramData\\TDS"),
+                os.path.abspath(os.path.dirname(__file__))
+            ]
+            
+            is_allowed = any(abs_path.startswith(d) for d in allowed_dirs)
+            if not is_allowed:
+                print(f"SECURITY ERROR: Unauthorized path traversal attempt: {input_data}")
+                sys.exit(1)
+
+            # snyk:ignore:path-traversal-verified-sanitization
+            with open(abs_path, 'r') as f:
                 data = json.load(f)
         else:
             data = json.loads(input_data)

@@ -52,7 +52,9 @@ typedef enum _TDS_EVENT_TYPE {
     TDSEventRegistryRename = 15,
     TDSEventApcInjection = 16,
     TDSEventEarlyBirdInjection = 17,
-    TDSEventGhostingAttempt = 18
+    TDSEventGhostingAttempt = 18,
+    TDSEventVssDeletion = 19,
+    TDSEventRansomwareActivity = 20
 } TDS_EVENT_TYPE;
 
 typedef enum _TDS_THREAT_SEVERITY {

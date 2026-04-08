@@ -7,6 +7,7 @@
 #include <winternl.h>
 #include <unordered_set>
 #include <amsi.h>
+#include "HeuristicsEngine.h"
 #include "Logger.h"
 #include "detectors/NetworkDetector.h"
 #include "ips/IPSManager.h"
@@ -57,6 +58,9 @@ void TDSEngine::AnalysisLoop() {
     while (m_running) {
         auto eventOpt = m_eventBus->WaitAndPop(500);
         if (eventOpt) {
+            // Behavioral Heuristics Engine
+            HeuristicsEngine::Instance().ProcessEvent(*eventOpt);
+
             EvaluateThreat(*eventOpt);
             m_correlator->Analyze(*eventOpt);
         }

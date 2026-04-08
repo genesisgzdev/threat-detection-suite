@@ -14,6 +14,8 @@ public:
     static void ShutdownYara();
 
     static bool DetectNopSleds(HANDLE hProcess, LPVOID startAddress, SIZE_T regionSize);
+    static bool DetectDirectSyscalls(HANDLE hProcess, LPVOID baseAddress, SIZE_T regionSize);
+    static bool DetectStackPivoting(HANDLE hProcess, HANDLE hThread);
     static void ScanProcessHooks(HANDLE hProcess);
     static void DetectProcessHollowing(HANDLE hProcess, const std::wstring& processName);
     static void ScanAllProcesses();

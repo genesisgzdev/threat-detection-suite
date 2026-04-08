@@ -26,6 +26,7 @@ link_directories(${YARA_LIB_DIR})
 # Shared Core Library (Internal)
 add_library(TDSCore OBJECT
     ThreatDetectionSuite/TDSEngine/TDSEngine.cpp
+    ThreatDetectionSuite/TDSEngine/HeuristicsEngine.cpp
     ThreatDetectionSuite/TDSEngine/ips/IPSManager.cpp
     ThreatDetectionSuite/TDSEngine/collectors/EtwCollector.cpp
     ThreatDetectionSuite/TDSEngine/correlator/SequenceCorrelator.cpp
