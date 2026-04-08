@@ -26,6 +26,7 @@ link_directories(${YARA_LIB_DIR})
 # Shared Core Library (Internal)
 add_library(TDSCore OBJECT
     ThreatDetectionSuite/TDSEngine/TDSEngine.cpp
+    ThreatDetectionSuite/TDSEngine/HeuristicsEngine.cpp
     ThreatDetectionSuite/TDSEngine/ips/IPSManager.cpp
     ThreatDetectionSuite/TDSEngine/collectors/EtwCollector.cpp
     ThreatDetectionSuite/TDSEngine/correlator/SequenceCorrelator.cpp
@@ -39,14 +40,14 @@ add_library(TDSCore OBJECT
 set(TDS_EXTERNAL_LIBS wbemuuid taskschd comsuppw advapi32 ntdll ws2_32 iphlpapi wintrust tdh dbghelp libyara libcrypto libssl crypt32)
 
 # Userland Engine
-add_executable(TDSService 
-    ThreatDetectionSuite/TDSEngine/TDSService.cpp 
+add_executable(TDSService
+    ThreatDetectionSuite/TDSEngine/TDSService.cpp
     $<TARGET_OBJECTS:TDSCore>
 )
 target_link_libraries(TDSService ${TDS_EXTERNAL_LIBS})
 
 # Integration Bridge & Test Utility
-add_executable(TDSBridge 
+add_executable(TDSBridge
     tools/bridge/TDSBridge.cpp
     $<TARGET_OBJECTS:TDSCore>
 )
