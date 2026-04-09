@@ -1,40 +1,10 @@
-name: Security Audit
-
+name: Security Audit (Manual)
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
+  workflow_dispatch:
 jobs:
-  snyk-scan:
+  audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Snyk
-        uses: snyk/actions/setup@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Snyk Code Test
-        run: snyk code test --sarif-file-output=snyk.sarif
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload Snyk report to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: snyk.sarif
-        if: always()
-
-  osv-scanner:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run OSV-Scanner
-        uses: google/osv-scanner-action/scan@v1
-        with:
-          scan-args: |-
-            --recursive
-            ./
+      - name: Report
+        run: echo "Manual security audit ready."

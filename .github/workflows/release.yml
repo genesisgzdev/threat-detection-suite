@@ -1,0 +1,24 @@
+name: Production Release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag'
+        required: true
+        default: 'v5.6.5'
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: ${{ github.event.inputs.tag }}
+          body: |
+            Definitive Architecture Release v5.6.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
