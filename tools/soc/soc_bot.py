@@ -1,120 +1,85 @@
-import json
 import os
+import time
+import json
+import requests
 import sys
-import datetime
-from github import Github
 
-# Professional SOC Orchestrator with Dead-Letter Queue (DLQ) Fallback
-# Handles dynamic threat reporting and ensures telemetry persistence even during API outages/403s.
+# Configuration via environment variables (No hardcoded secrets or local paths)
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+REPO_OWNER = os.environ.get("GITHUB_REPOSITORY_OWNER", "genesisgzdev")
+REPO_NAME = os.environ.get("GITHUB_REPOSITORY_NAME", "threat-detection-suite")
+LOG_FILE_PATH = os.environ.get("TDS_LOG_PATH", "/var/log/tds/threats.jsonl") # Default to standard Linux path, configurable for Windows
 
-class ThreatReporter:
-    def __init__(self):
-        self.github_token = os.getenv('GITHUB_TOKEN')
-        self.repo_name = os.getenv('GITHUB_REPOSITORY', 'genesisgzdev/threat-detection-suite')
-        self.dlq_path = "C:\\ProgramData\\TDS\\soc_dlq.log"
+if not GITHUB_TOKEN:
+    print("Error: GITHUB_TOKEN environment variable not set. Exiting.")
+    sys.exit(1)
 
-    def write_to_dlq(self, payload_data, error_msg):
-        """Fallback mechanism: Saves alert to a local Dead Letter Queue if cloud reporting fails."""
-        try:
-            os.makedirs("C:\\ProgramData\\TDS", exist_ok=True)
-            with open(self.dlq_path, 'a') as f:
-                log_entry = {
-                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                    "status": "DLQ_FALLBACK",
-                    "error": error_msg,
-                    "payload": payload_data
-                }
-                f.write(json.dumps(log_entry) + "\n")
-            print(f"WARN: Cloud alert failed ({error_msg}). Alert safely persisted to DLQ: {self.dlq_path}")
-        except Exception as dlq_e:
-            print(f"CRITICAL: DLQ Write Failed! Both cloud and local reporting are down: {str(dlq_e)}")
+def create_github_issue(threat_data):
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/issues"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    title = f"[TDS Alert] {threat_data.get('severity', 'UNKNOWN')} Threat Detected: {threat_data.get('category', 'General')}"
+    
+    body = f"""
+## Threat Detection Report
 
-    def initialize_clients(self):
-        if not self.github_token:
-            print("WARN: GITHUB_TOKEN environment variable is not defined. Operating in Local-Only (DLQ) Mode.")
-            return False
-        
-        try:
-            self.gh = Github(auth=__import__('github').Auth.Token(self.github_token))
-            self.repo = self.gh.get_repo(self.repo_name)
-            return True
-        except Exception as e:
-            print(f"WARN: GitHub API Initialization failed ({str(e)}). Operating in Local-Only (DLQ) Mode.")
-            return False
+* **ID**: `{threat_data.get('id')}`
+* **Severity**: `{threat_data.get('severity')}`
+* **Category**: `{threat_data.get('category')}`
+* **Timestamp**: `{threat_data.get('timestamp')}`
+* **Associated PID**: `{threat_data.get('pid')}`
 
-    def process_incident(self, payload):
-        if not payload:
-            return
+### Description
+{threat_data.get('description', 'No description provided.')}
 
-        severity = payload.get('severity', 'UNKNOWN')
-        category = payload.get('category', 'GENERAL')
-        description = payload.get('description', 'No detailed description provided.')
-        pid = payload.get('pid', 0)
-        ioc = payload.get('ioc', 'N/A')
+### Indicator of Compromise (IoC)
+`{threat_data.get('ioc', 'N/A')}`
 
-        title = f"[SOC-ALERT] {severity}: {category} Detection"
-        
-        body = f"""
-## Security Operations Center (SOC) - Incident Report
-
-### Technical Details
-- **Description:** {description}
-- **Artifact/IoC:** `{ioc}`
-- **Target PID:** {pid}
-- **Timestamp (UTC):** {datetime.datetime.now(datetime.UTC).isoformat()}Z
-
-### Verification
-- **Kernel Integrity:** ObRegisterCallbacks & Section Sync Interception enforced.
-- **Forensics:** Automated minidump generated.
-"""
-        
-        if hasattr(self, 'repo'):
-            try:
-                issue = self.repo.create_issue(title=title, body=body, labels=['security', f'severity-{severity.lower()}'])
-                print(f"INFO: GitHub Issue #{issue.number} created successfully.")
-                return
-            except Exception as e:
-                error_details = str(e)
-                # Specifically catch 403s which we've been seeing
-                if "403" in error_details or "Resource not accessible by personal access token" in error_details:
-                    error_details = "403 Forbidden: Token lacks 'Issues: Write' permissions for this repo."
-                
-                self.write_to_dlq(payload, f"GitHub API Error: {error_details}")
-        else:
-            self.write_to_dlq(payload, "No active GitHub connection")
-
-if __name__ == "__main__":
-    reporter = ThreatReporter()
-    reporter.initialize_clients() # We proceed even if false, to use DLQ
+---
+*Automated report generated by TDS Telemetry Engine.*
+    """
+    
+    payload = {
+        "title": title,
+        "body": body,
+        "labels": ["security", "automated-alert", threat_data.get('severity', 'low').lower()]
+    }
     
     try:
-        if len(sys.argv) < 2:
-            print("Usage: soc_bot.py <json_payload_or_path>")
-            sys.exit(1)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+        print(f"Successfully created GitHub issue for threat ID {threat_data.get('id')}")
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to create GitHub issue: {e}")
 
-        input_data = sys.argv[1]
-        
-        # Security Hardening: Prevent Path Traversal (Finding ID: bedeaea4-b580-4f01-b800-5eed43512489)
-        if os.path.isfile(input_data):
-            # Normalize and validate path
-            abs_path = os.path.abspath(input_data)
-            # Only allow reading from ProgramData/TDS or current tools/soc directory
-            allowed_dirs = [
-                os.path.abspath("C:\\ProgramData\\TDS"),
-                os.path.abspath(os.path.dirname(__file__))
-            ]
+def tail_log_file(file_path):
+    if not os.path.exists(file_path):
+        print(f"Log file not found at {file_path}. Waiting for creation...")
+        while not os.path.exists(file_path):
+            time.sleep(5)
             
-            is_allowed = any(abs_path.startswith(d) for d in allowed_dirs)
-            if not is_allowed:
-                print(f"SECURITY ERROR: Unauthorized path traversal attempt: {input_data}")
-                sys.exit(1)
-
-            # snyk:ignore:path-traversal-verified-sanitization
-            with open(abs_path, 'r') as f:
-                data = json.load(f)
-        else:
-            data = json.loads(input_data)
+    with open(file_path, 'r') as file:
+        # Seek to the end of the file to only process new events
+        file.seek(0, os.SEEK_END)
+        print(f"Tailing {file_path} for new threats in real-time...")
         
-        reporter.process_incident(data)
-    except Exception as e:
-        print(f"ERROR: Input processing failed: {str(e)}")
+        while True:
+            line = file.readline()
+            if not line:
+                time.sleep(0.5)
+                continue
+            
+            try:
+                threat_data = json.loads(line.strip())
+                # Only report High and Critical threats to avoid API rate limits
+                severity = threat_data.get('severity', '').upper()
+                if severity in ['HIGH', 'CRITICAL']:
+                    create_github_issue(threat_data)
+            except json.JSONDecodeError:
+                print("Failed to decode JSON line.")
+
+if __name__ == "__main__":
+    tail_log_file(LOG_FILE_PATH)

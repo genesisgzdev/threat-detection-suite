@@ -1,38 +1,16 @@
-﻿# Contributing to Threat Detection Suite (TDS)
+# Contributing to Threat Detection Suite
 
-We welcome technical contributions that push the boundaries of event-driven security.
+## Build Requirements
+- **Compiler**: Microsoft Visual C++ (MSVC) or Clang-cl.
+- **WDK**: Windows Driver Kit for the target Windows SDK.
+- **Language Standards**: C11 for TDSDriver.sys, C++17 for user-mode components.
 
-## ðŸ›  Engineering Standards
+## Kernel Programming Standards
+1. **Concurrency**: The use of KSPIN_LOCK in high-frequency dispatch routines (like IRP_MJ_WRITE) is prohibited. All telemetry queuing must use SLIST_HEADER and the Interlocked*SList API family.
+2. **Memory Allocation**: Direct calls to ExAllocatePool for repetitive events are banned due to kernel pool fragmentation. Use ExAllocateFromNpagedLookasideList.
+3. **IRQL Assertions**: Operations requiring page faults or string manipulation must be gated with KeGetCurrentIrql() == PASSIVE_LEVEL.
+4. **Exception Handling**: All IOCTL handlers must implement __try / __except blocks. If METHOD_NEITHER is used, the user-mode buffer must be validated with ProbeForRead and ProbeForWrite inside the __try block.
 
-### Languages & Dialects
--   **User-Mode Engine**: Strictly **C++17**. We leverage modern RAII, filesystem, and template metaprogramming.
--   **Kernel-Mode Core**: Strictly **C11** (MSVC/WDK compatible). No GNU extensions that break cross-compiler compatibility for driver development.
-
-### ðŸš« The "Zero Polling" Mandate
-TDS is a 100% **Event-Driven** framework. Any contribution that introduces polling (e.g., `while(true) { sleep(100); check_status(); }`) will be **rejected automatically**. 
-- Use **Kernel Callbacks** (`PsSetCreateProcessNotifyRoutineEx`, `ObRegisterCallbacks`).
-- Use **WFP Callouts** for network.
-- Use **Minifilter** for I/O.
-- Use **ETW-Ti** for advanced threat intelligence telemetry.
-
-## ðŸš€ Contribution Workflow
-
-1.  **Architecture Alignment**: Before writing complex code, open a "Design Proposal" issue to discuss the implementation strategy.
-2.  **VM Testing**: All kernel-mode changes MUST be verified using **Driver Verifier** and tested in a VM against various Windows 10/11 builds.
-3.  **Security Audit**: Run local Snyk and OSV-Scanner checks:
-    ```bash
-    # Check for vulnerable dependencies
-    osv-scanner --recursive .
-    # Perform static analysis
-    snyk code test
-    ```
-4.  **Pull Request**: Provide a detailed description of the changes and the evidence of successful testing (logs/dumps).
-
-## ðŸ–‹ Style Guide
-- Use **PascalCase** for Classes/Structs and **camelCase** for members/functions.
-- Prefer `std::unique_ptr` and `std::shared_ptr` in user-mode; manual memory management in kernel-mode must be handled with strict `ExAllocatePool2` / `ExFreePool` cycles.
-- All sensitive strings must be encrypted/obfuscated at compile time.
-
-## âš–ï¸ License
-By contributing to TDS, you agree that your code will be released under the [Apache License 2.0](LICENSE).
-
+## User-Mode Programming Standards
+- The engine uses a polymorphic Event bus (std::variant in <variant>).
+- Blocking the main analysis thread is strictly forbidden. Heavy operations, such as calculating Shannon Entropy for large files, must be constrained to a reasonable byte limit or dispatched to a separate thread pool.

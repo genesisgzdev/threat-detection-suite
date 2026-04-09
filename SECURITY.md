@@ -1,34 +1,18 @@
-﻿# Security Policy: Responsible Disclosure
+# Security Policy and Threat Model
 
-The Threat Detection Suite (TDS) team is committed to ensuring the security and integrity of our users' systems. We recognize the critical role that security researchers play in the ecosystem and welcome their contributions through responsible disclosure.
+## Threat Model
+The Threat Detection Suite (TDS) assumes an attacker with local execution privileges in User-Mode (Ring 3), attempting to escalate to Kernel-Mode (Ring 0), exfiltrate data, or deploy fileless payloads.
 
-## Reporting a Vulnerability
+### In-Scope Vulnerabilities
+- **Direct Syscalls & API Unhooking**: Bypassing user-mode API hooks (
+tdll.dll).
+- **Memory Evasion**: NOP Sleds, Reflective DLL Loading, and Process Hollowing in MEM_PRIVATE space.
+- **Ransomware / Wiper Mass I/O**: High-velocity file modifications and Volume Shadow Copy (VSS) deletion via ssadmin or wmic.
+- **Covert Channels**: Exfiltration over ICMP payloads or oversized DNS (UDP 53) queries.
 
-If you discover a security vulnerability within TDS, we ask that you provide us with the opportunity to remediate the issue before any public disclosure.
+### Out-of-Scope Vulnerabilities
+- **Bootkits / UEFI Rootkits**: TDS is initialized by the NT Kernel. It relies on Secure Boot and TPM measurements to guarantee the integrity of the early boot chain.
+- **Physical Access Attacks**: Direct Memory Access (DMA) attacks via Thunderbolt/PCIe or cold boot attacks.
 
-### ðŸ›¡ï¸ Submission Process
-1.  **DO NOT** open public issues or pull requests for security vulnerabilities.
-2.  Send an encrypted email to `security@tds-project.org` (PGP Key ID: `0xDEADBEEF`) or use our private reporting portal if available.
-3.  Include a detailed description of the vulnerability, including:
-    -   Affected component (Driver, Service, API).
-    -   Step-by-step instructions to reproduce the issue.
-    -   A Proof-of-Concept (PoC) if possible (please ensure PoCs are safe and non-destructive).
-    -   Potential impact assessment.
-
-### ðŸ¤ Our Commitment
-- We will acknowledge receipt of your report within **24-48 hours**.
-- We will provide a preliminary assessment and an estimated timeline for a fix.
-- We will notify you once the vulnerability has been patched.
-- We will offer attribution in our security advisories (with your consent).
-
-## Prohibited Actions
-While we encourage research, the following actions are strictly prohibited:
-- Any testing that results in a Denial of Service (DoS) or system instability on non-lab environments.
-- Exfiltration of data from systems you do not own.
-- Social engineering or physical security attacks against maintainers or users.
-
-## Disclosure Timeline
-We follow a coordinated disclosure model. We generally aim to release a patch and a security advisory within **90 days** of the report. We ask that you refrain from sharing technical details publicly until the patch is available.
-
-Thank you for helping us keep the Windows kernel a safer place.
-
+## Vulnerability Reporting
+Submit findings involving Kernel Panics (BSOD), memory leaks, lock contention, or execution bypasses directly via GitHub Issues. Ensure any Proof-of-Concept (PoC) code targets isolated execution paths and limits loop counts to prevent denial of service during triage.

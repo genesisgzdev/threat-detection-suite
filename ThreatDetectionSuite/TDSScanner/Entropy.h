@@ -1,17 +1,12 @@
-﻿#pragma once
-#include <windows.h>
+#pragma once
 #include <string>
+#include <vector>
+#include <cstdint>
 
 namespace TDS {
-
-class Entropy {
-public:
-    static float Calculate(const void* data, size_t size);
-    static bool IsFileHighEntropy(const std::wstring& filePath, float threshold = 7.8f);
-
-private:
-    static bool IsCompressedFormat(const BYTE* header, DWORD size);
-};
-
-} // namespace TDS
-
+    class EntropyAnalyzer {
+    public:
+        static double CalculateShannonEntropy(const std::vector<uint8_t>& buffer);
+        static bool AnalyzeFile(const std::string& filePath, double threshold = 7.5);
+    };
+}
