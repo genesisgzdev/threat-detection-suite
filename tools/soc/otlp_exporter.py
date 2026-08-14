@@ -18,7 +18,10 @@ from urllib.request import Request, urlopen
 
 def endpoint() -> str:
     value = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "").strip()
-    return value or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").rstrip("/") + "/v1/logs"
+    if value:
+        return value
+    base = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip().rstrip("/")
+    return f"{base}/v1/logs" if base else ""
 
 
 def to_otlp(record: dict) -> dict:

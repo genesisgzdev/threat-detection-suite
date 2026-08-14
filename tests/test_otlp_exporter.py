@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import unittest
 from pathlib import Path
 
@@ -11,6 +12,17 @@ spec.loader.exec_module(exporter)
 
 
 class OtlpMappingTests(unittest.TestCase):
+    def test_endpoint_is_disabled_without_configuration(self):
+        old_logs = os.environ.pop("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", None)
+        old_base = os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+        try:
+            self.assertEqual(exporter.endpoint(), "")
+        finally:
+            if old_logs is not None:
+                os.environ["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = old_logs
+            if old_base is not None:
+                os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = old_base
+
     def test_otlp_mapping_preserves_security_fields(self):
         record = {
             "timestamp": 1700000000000,
