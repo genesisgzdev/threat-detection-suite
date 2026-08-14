@@ -128,11 +128,20 @@ VOID WINAPI ServiceMain(DWORD argc, LPWSTR *argv) {
     }
 
     HANDLE hThread = CreateThread(NULL, 0, ServiceWorkerThread, NULL, 0, NULL);
+    if (hThread == NULL) {
+        CloseHandle(g_ServiceStopEvent);
+        g_ServiceStopEvent = INVALID_HANDLE_VALUE;
+        g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+        g_ServiceStatus.dwWin32ExitCode = GetLastError();
+        SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
+        return;
+    }
     
     g_ServiceStatus.dwCurrentState = SERVICE_RUNNING;
     SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
 
     WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
     
     CloseHandle(g_ServiceStopEvent);
     g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;

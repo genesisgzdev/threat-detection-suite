@@ -50,6 +50,10 @@ void NetworkDetector::DetectBeaconing(uint32_t pid, const std::string& remoteIp)
     keyStream << pid << "_" << remoteIp;
     std::string key = keyStream.str();
 
+    if (s_ConnectionProfiles.size() >= 10000 && s_ConnectionProfiles.find(key) == s_ConnectionProfiles.end()) {
+        s_ConnectionProfiles.erase(s_ConnectionProfiles.begin());
+    }
+
     uint64_t now = GetTickCount64();
     auto& profile = s_ConnectionProfiles[key];
     
