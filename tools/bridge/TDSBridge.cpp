@@ -9,6 +9,7 @@
 #include <iostream>
 #include <iomanip>
 #include <mutex>
+#include <atomic>
 
 // Common Headers
 #include "../../ThreatDetectionSuite/TDSCommon/TDSCommon.h"

@@ -6,6 +6,8 @@
 #include <map>
 #include <mutex>
 #include <memory>
+#include <thread>
+#include <atomic>
 #include <wrl/client.h>
 #include <cmath>
 #include "../TDSCommon/TDSCommon.h"

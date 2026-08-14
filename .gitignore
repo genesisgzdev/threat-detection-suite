@@ -26,6 +26,9 @@ Generated Files/
 *.VC.db
 *.VC.opendb
 
+# The kernel project is a required source artifact, not a generated solution.
+!ThreatDetectionSuite/TDSDriver/TDSDriver.vcxproj
+
 # WDK / Driver Build Artifacts
 *.sys
 *.inf
