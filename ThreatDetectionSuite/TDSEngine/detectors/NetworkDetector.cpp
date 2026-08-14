@@ -14,6 +14,7 @@
 #include "../Logger.h"
 #include "../ips/IPSManager.h"
 #include "../ThreatIntelManager.h"
+#include "../ResponsePolicy.h"
 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -70,8 +71,10 @@ void NetworkDetector::DetectBeaconing(uint32_t pid, const std::string& remoteIp)
             pid
         );
         
-        // Trigger automated containment
-        IPSManager::TerminateNetworkConnection(pid, remoteIp);
+        ResponsePolicy policy = ResponsePolicy::FromEnvironment();
+        if (policy.AllowsTermination(95) || policy.AllowsContainment(95)) {
+            IPSManager::TerminateNetworkConnection(pid, remoteIp);
+        }
         
         // Clear the profile to prevent log spam
         profile.timestamps.clear();
@@ -101,20 +104,41 @@ void NetworkDetector::AnalyzeConnection(uint32_t pid, const TDS_NETWORK_EVENT_DA
         Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_NETWORK_ANOMALY, "Suspicious outbound port connectivity", ipStr, pid);
     }
 
+    std::wstring processName = GetProcessNameFromPid(pid);
+    if (IsAnomalousNetworkProcess(processName)) {
+        Logger::Instance().LogThreat(TDS_SEVERITY_MEDIUM, CAT_NETWORK_ANOMALY,
+            "Script or LOLBin process opened an outbound connection", ipStr, pid);
+    }
+
     // Apply real-time beaconing heuristics
     DetectBeaconing(pid, ipStr);
     
-    // Asynchronous Threat Intel Enrichment (simulating a non-blocking background queue)
-    // std::string enrichment = ThreatIntelManager::Instance().EnrichIoC(ipStr);
+    // Optional enrichment is deliberately outside the detection critical path.
+    ThreatIntelManager::Instance().EnrichIoC(ipStr);
 }
 
 std::wstring NetworkDetector::GetProcessNameFromPid(uint32_t pid) {
-    UNREFERENCED_PARAMETER(pid);
-    return L"Unknown";
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return L"";
+    WCHAR path[MAX_PATH] = {};
+    DWORD size = ARRAYSIZE(path);
+    std::wstring result;
+    if (QueryFullProcessImageNameW(process, 0, path, &size)) result.assign(path, size);
+    CloseHandle(process);
+    return result;
 }
 
 bool NetworkDetector::IsAnomalousNetworkProcess(const std::wstring& processName) {
-    UNREFERENCED_PARAMETER(processName);
+    if (processName.empty()) return false;
+    std::wstring lower = processName;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+    static const wchar_t* suspicious[] = {
+        L"\\powershell.exe", L"\\mshta.exe", L"\\rundll32.exe",
+        L"\\regsvr32.exe", L"\\certutil.exe", L"\\bitsadmin.exe"
+    };
+    for (const auto* suffix : suspicious) {
+        if (lower.size() >= wcslen(suffix) && lower.compare(lower.size() - wcslen(suffix), wcslen(suffix), suffix) == 0) return true;
+    }
     return false;
 }
 

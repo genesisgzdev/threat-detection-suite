@@ -12,9 +12,6 @@ PDEVICE_OBJECT g_DeviceObject = NULL;
 PFLT_FILTER g_FilterHandle = NULL;
 NPAGED_LOOKASIDE_LIST g_EventLookasideList;
 
-KSPIN_LOCK g_IrpQueueLock;
-LIST_ENTRY g_PendingIrpList;
-
 // [INDUSTRIAL UPDATE] Lock-Free Interlocked Singly Linked List
 DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) SLIST_HEADER g_EventQueueHead;
 
@@ -42,11 +39,6 @@ DEFINE_GUID(TDS_WFP_CALLOUT_V6_GUID, 0xa1b2c3d4, 0xe5f6, 0x4a1b, 0x8c, 0x9d, 0xe
 DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V4_GUID, 0xf1e2d3c4, 0xb5a6, 0x4987, 0x8e, 0x7d, 0x6c, 0x5b, 0x4a, 0x39, 0x28, 0x17);
 DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V6_GUID, 0xd1c2b3a4, 0x9e8d, 0x4c7b, 0x6a, 0x5f, 0x4e, 0x3d, 0x2c, 0x1b, 0x0a, 0x98);
 DEFINE_GUID(TDS_SUBLAYER_GUID, 0x29c786a3, 0x5a1b, 0x4f4f, 0xb4, 0x8a, 0x8e, 0x1f, 0x1d, 0x1c, 0x1b, 0x1a);
-
-typedef struct _TDS_PENDING_IRP {
-    LIST_ENTRY ListEntry;
-    PIRP Irp;
-} TDS_PENDING_IRP, *PTDS_PENDING_IRP;
 
 typedef struct _EVENT_ITEM {
     DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) SLIST_ENTRY ListEntry; // MUST BE FIRST
@@ -127,12 +119,12 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
         ULONG required = sizeof(TDS_EVENT_HEADER) + header->DataSize;
         if (header->DataSize > MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER) || required > outLength) {
             InterlockedDecrement(&g_EventCount);
-            ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+            ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
             return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, required);
         }
         RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, header, required);
         InterlockedDecrement(&g_EventCount);
-        ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+        ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
         return CompleteIrp(Irp, STATUS_SUCCESS, required);
     }
 
@@ -170,69 +162,10 @@ BOOLEAN IsLsass(PEPROCESS Process) {
     return match;
 }
 
-VOID CancelPendingIrp(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
-    UNREFERENCED_PARAMETER(DeviceObject);
-    KIRQL irql;
-    IoReleaseCancelSpinLock(Irp->CancelIrql);
-    KeAcquireSpinLock(&g_IrpQueueLock, &irql);
-    PTDS_PENDING_IRP pIrp = (PTDS_PENDING_IRP)Irp->Tail.Overlay.DriverContext[0];
-    if (pIrp) {
-        RemoveEntryList(&pIrp->ListEntry);
-        ExFreePoolWithTag(pIrp, 'SDTe');
-    }
-    KeReleaseSpinLock(&g_IrpQueueLock, irql);
-    Irp->IoStatus.Status = STATUS_CANCELLED;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-}
-
-void DispatchPendingEvents() {
-    KIRQL irpIrql;
-    PSLIST_ENTRY entry;
-
-    while (TRUE) {
-        KeAcquireSpinLock(&g_IrpQueueLock, &irpIrql);
-        if (IsListEmpty(&g_PendingIrpList)) { KeReleaseSpinLock(&g_IrpQueueLock, irpIrql); break; }
-        
-        // [INDUSTRIAL UPDATE] Lock-Free Pop from SList
-        entry = InterlockedPopEntrySList(&g_EventQueueHead);
-        if (entry == NULL) { KeReleaseSpinLock(&g_IrpQueueLock, irpIrql); break; }
-        
-        PLIST_ENTRY irpEntry = g_PendingIrpList.Flink;
-        PTDS_PENDING_IRP pIrp = CONTAINING_RECORD(irpEntry, TDS_PENDING_IRP, ListEntry);
-        PIRP Irp = pIrp->Irp;
-        
-        if (IoSetCancelRoutine(Irp, NULL) == NULL) {
-            RemoveEntryList(&pIrp->ListEntry); ExFreePoolWithTag(pIrp, 'SDTe');
-            KeReleaseSpinLock(&g_IrpQueueLock, irpIrql); 
-            // Return popped event since IRP was cancelled
-            InterlockedPushEntrySList(&g_EventQueueHead, entry);
-            continue;
-        }
-        RemoveEntryList(&pIrp->ListEntry);
-        KeReleaseSpinLock(&g_IrpQueueLock, irpIrql);
-        
-        PEVENT_ITEM pEvent = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
-        PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
-        ULONG outLen = irpSp->Parameters.DeviceIoControl.OutputBufferLength;
-        PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(pEvent + 1);
-        ULONG requiredLen = sizeof(TDS_EVENT_HEADER) + header->DataSize;
-        
-        if (outLen >= requiredLen) {
-            RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, header, requiredLen);
-            Irp->IoStatus.Status = STATUS_SUCCESS; Irp->IoStatus.Information = requiredLen;
-        } else {
-            Irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
-        }
-        IoCompleteRequest(Irp, IO_NO_INCREMENT);
-        ExFreePoolWithTag(pIrp, 'SDTe'); 
-        ExFreeFromNpagedLookasideList(&g_EventLookasideList, pEvent);
-    }
-}
-
 void QueueTDSEvent(PEVENT_ITEM item) {
     if (InterlockedIncrement(&g_EventCount) > EVENT_QUEUE_LIMIT) {
         InterlockedDecrement(&g_EventCount);
-        ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+        ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
         return;
     }
     InterlockedPushEntrySList(&g_EventQueueHead, &item->ListEntry);
@@ -321,7 +254,6 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = TDSDispatchDeviceControl;
     
     // [INDUSTRIAL UPDATE] Initialize SList
-    InitializeListHead(&g_PendingIrpList); KeInitializeSpinLock(&g_IrpQueueLock);
     InitializeSListHead(&g_EventQueueHead);
     
     ExInitializeNpagedLookasideList(&g_EventLookasideList, NULL, NULL, 0, MAX_EVENT_BUFFER_SIZE + sizeof(EVENT_ITEM), 'SDTe', 0);
@@ -360,7 +292,7 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     PSLIST_ENTRY entry;
     while ((entry = InterlockedPopEntrySList(&g_EventQueueHead)) != NULL) {
         PEVENT_ITEM item = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
-        ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+        ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
     }
     ExDeleteNpagedLookasideList(&g_EventLookasideList);
     IoDeleteDevice(g_DeviceObject);

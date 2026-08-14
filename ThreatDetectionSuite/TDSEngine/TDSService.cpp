@@ -174,7 +174,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     etw.Start();
 
     // The service now informs the driver of its PID for self-protection
-    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Kernel", GENERIC_READ | GENERIC_WRITE, 
+    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Link", GENERIC_READ | GENERIC_WRITE,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     
     TDS_PROTECTION_POLICY policy = {};
@@ -205,7 +205,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     DWORD bytesReturned = 0;
     while (WaitForSingleObject(g_ServiceStopEvent, 1000) == WAIT_TIMEOUT) {
         if (hDevice == INVALID_HANDLE_VALUE) {
-            hDevice = CreateFileW(L"\\\\.\\TDS_Core_Kernel", GENERIC_READ | GENERIC_WRITE,
+            hDevice = CreateFileW(L"\\\\.\\TDS_Core_Link", GENERIC_READ | GENERIC_WRITE,
                                   FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
             Sleep(1000);
             continue;

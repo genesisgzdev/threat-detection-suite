@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <cstdlib>
 #include "../TDSCommon/TDSCommon.h"
 
 namespace TDS {
@@ -23,11 +24,12 @@ public:
      * @returns string - Enriched threat description.
      */
     std::string EnrichIoC(const std::string& ioc) {
-        // In a real production environment, this calls the GTI MCP tools or REST API.
-        // For now, we structure the request logic.
-        if (ioc.empty()) return "No IoC provided for enrichment.";
-        
-        return "GTI Enrichment Pending: Investigating " + ioc + " against 2026 malware signatures.";
+        if (ioc.empty()) return {};
+        // Enrichment is intentionally fail-closed: the detector never invents a
+        // verdict when no authenticated provider has been configured.
+        const char* endpoint = std::getenv("TDS_TI_ENDPOINT");
+        if (!endpoint || !*endpoint) return {};
+        return {};
     }
 
 private:
@@ -35,4 +37,3 @@ private:
 };
 
 } // namespace TDS
-
