@@ -1,5 +1,10 @@
 # Security Policy and Threat Model
 
+TDS is not presented as a finished commercial EDR. Claims in this document are
+capabilities under test and must be backed by the Windows acceptance suite before
+being treated as production guarantees. The default build observes and records;
+it does not terminate processes or block network traffic automatically.
+
 ## Threat Model
 The Threat Detection Suite (TDS) assumes an attacker with local execution privileges in User-Mode (Ring 3), attempting to escalate to Kernel-Mode (Ring 0), exfiltrate data, or deploy fileless payloads.
 

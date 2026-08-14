@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-project(ThreatDetectionSuite VERSION 5.0.0)
+project(ThreatDetectionSuite VERSION 5.6.5 LANGUAGES C CXX)
+
+if(NOT WIN32)
+    message(FATAL_ERROR "ThreatDetectionSuite user-mode build requires Windows; use build.sh for repository-only checks")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -10,9 +14,23 @@ if(MSVC)
     add_link_options(/DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /GUARD:CF /CETCOMPAT)
 endif()
 
-# External Dependencies (YARA)
-set(YARA_INCLUDE_DIR "C:/Tools/libyara_sdk/lib/native/include")
-set(YARA_LIB_DIR "C:/Tools/libyara_sdk/lib/native/x64/lib")
+# External Dependencies (YARA). The path is supplied by the build environment;
+# no developer workstation path is part of the project configuration.
+option(TDS_ENABLE_YARA "Enable YARA memory scanning" OFF)
+set(TDS_YARA_ROOT "" CACHE PATH "Root of the YARA SDK")
+if(TDS_ENABLE_YARA)
+    find_path(YARA_INCLUDE_DIR yara.h
+        HINTS "${TDS_YARA_ROOT}/include" "${TDS_YARA_ROOT}/lib/native/include")
+    find_library(YARA_LIBRARY NAMES yara libyara
+        HINTS "${TDS_YARA_ROOT}/lib" "${TDS_YARA_ROOT}/lib/native/x64/lib")
+    if(NOT YARA_INCLUDE_DIR OR NOT YARA_LIBRARY)
+        message(FATAL_ERROR "YARA SDK not found. Set -DTDS_YARA_ROOT=<path> or disable TDS_ENABLE_YARA")
+    endif()
+    add_compile_definitions(TDS_HAS_YARA=1)
+else()
+    set(YARA_INCLUDE_DIR "")
+    set(YARA_LIBRARY "")
+endif()
 
 # Common headers
 include_directories(ThreatDetectionSuite/TDSCommon)
@@ -20,8 +38,6 @@ include_directories(ThreatDetectionSuite/TDSEngine)
 include_directories(ThreatDetectionSuite/TDSEngine/ips)
 include_directories(ThreatDetectionSuite/TDSScanner)
 include_directories(${YARA_INCLUDE_DIR})
-
-link_directories(${YARA_LIB_DIR})
 
 # Shared Core Library (Internal)
 add_library(TDSCore OBJECT
@@ -37,7 +53,7 @@ add_library(TDSCore OBJECT
     ThreatDetectionSuite/TDSScanner/Entropy.cpp
 )
 
-set(TDS_EXTERNAL_LIBS wbemuuid taskschd comsuppw advapi32 ntdll ws2_32 iphlpapi wintrust tdh dbghelp libyara libcrypto libssl crypt32)
+set(TDS_EXTERNAL_LIBS wbemuuid taskschd comsuppw advapi32 ntdll ws2_32 iphlpapi wintrust tdh dbghelp crypt32 ${YARA_LIBRARY})
 
 # Userland Engine
 add_executable(TDSService 
@@ -60,4 +76,13 @@ install(TARGETS TDSService TDSBridge
 
 # Testing Configuration
 enable_testing()
-# add_test(NAME IntegrationTest COMMAND TDSBridge --test)
+set_target_properties(TDSService TDSBridge PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+add_custom_target(TDSDriverBuild
+    COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+        "${CMAKE_SOURCE_DIR}/tools/build-driver.ps1"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Building Threat Detection Suite kernel driver with WDK")

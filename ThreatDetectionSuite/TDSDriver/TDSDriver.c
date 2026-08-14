@@ -23,6 +23,8 @@ LARGE_INTEGER g_RegistryCookie = {0};
 ULONG g_EdrPid = 0;
 ULONG g_ServicePid = 0; 
 BOOLEAN g_MonitoringActive = FALSE;
+TDS_PROTECTION_POLICY g_Policy = { 1, sizeof(TDS_PROTECTION_POLICY), TDS_POLICY_FLAG_PROTECT_SERVICE, 1, 0, 0, {0, 0, 0} };
+volatile LONG g_EventCount = 0;
 
 // WFP handles
 HANDLE g_EngineHandle = NULL;
@@ -58,6 +60,84 @@ void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTI
 void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo);
 void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create);
 NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument2);
+OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation);
+
+static NTSTATUS RegisterProtectionCallbacks(void) {
+    OB_OPERATION_REGISTRATION operations[2] = {0};
+    operations[0].ObjectType = PsProcessType;
+    operations[0].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
+    operations[0].PreOperation = TDSPreCallback;
+    operations[1].ObjectType = PsThreadType;
+    operations[1].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
+    operations[1].PreOperation = TDSPreCallback;
+
+    OB_CALLBACK_REGISTRATION registration = {0};
+    UNICODE_STRING altitude;
+    RtlInitUnicodeString(&altitude, L"385120");
+    registration.Version = OB_FLT_REGISTRATION_VERSION;
+    registration.OperationRegistrationCount = RTL_NUMBER_OF(operations);
+    registration.Altitude = altitude;
+    registration.RegistrationContext = NULL;
+    registration.OperationRegistration = operations;
+    return ObRegisterCallbacks(&registration, &g_ObRegistrationHandle);
+}
+
+static NTSTATUS CompleteIrp(PIRP Irp, NTSTATUS status, ULONG_PTR information) {
+    Irp->IoStatus.Status = status;
+    Irp->IoStatus.Information = information;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return status;
+}
+
+NTSTATUS TDSDispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
+    UNREFERENCED_PARAMETER(DeviceObject);
+    return CompleteIrp(Irp, STATUS_SUCCESS, 0);
+}
+
+NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
+    UNREFERENCED_PARAMETER(DeviceObject);
+    PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
+    ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
+    ULONG inLength = stack->Parameters.DeviceIoControl.InputBufferLength;
+    ULONG outLength = stack->Parameters.DeviceIoControl.OutputBufferLength;
+
+    if (code == IOCTL_TDS_SET_PROTECTION_POLICY) {
+        if (inLength != sizeof(TDS_PROTECTION_POLICY) || Irp->AssociatedIrp.SystemBuffer == NULL) {
+            return CompleteIrp(Irp, STATUS_INVALID_PARAMETER, 0);
+        }
+        PTDS_PROTECTION_POLICY requested = (PTDS_PROTECTION_POLICY)Irp->AssociatedIrp.SystemBuffer;
+        if (requested->Version != 1 || requested->Size != sizeof(TDS_PROTECTION_POLICY)) {
+            return CompleteIrp(Irp, STATUS_REVISION_MISMATCH, 0);
+        }
+        g_Policy = *requested;
+        g_ServicePid = IoGetRequestorProcessId(Irp);
+        g_MonitoringActive = requested->ObserveOnly ? FALSE : TRUE;
+        return CompleteIrp(Irp, STATUS_SUCCESS, 0);
+    }
+
+    if (code == IOCTL_TDS_GET_NEXT_EVENT) {
+        if (outLength < sizeof(TDS_EVENT_HEADER) || Irp->AssociatedIrp.SystemBuffer == NULL) {
+            return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, sizeof(TDS_EVENT_HEADER));
+        }
+        PSLIST_ENTRY entry = InterlockedPopEntrySList(&g_EventQueueHead);
+        if (entry == NULL) return CompleteIrp(Irp, STATUS_NO_MORE_ENTRIES, 0);
+
+        PEVENT_ITEM item = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
+        PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+        ULONG required = sizeof(TDS_EVENT_HEADER) + header->DataSize;
+        if (header->DataSize > MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER) || required > outLength) {
+            InterlockedDecrement(&g_EventCount);
+            ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+            return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, required);
+        }
+        RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, header, required);
+        InterlockedDecrement(&g_EventCount);
+        ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+        return CompleteIrp(Irp, STATUS_SUCCESS, required);
+    }
+
+    return CompleteIrp(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
+}
 
 PVOID GetProcessPeb(PEPROCESS Process) {
     PVOID peb = PsGetProcessWow64Process(Process);
@@ -150,10 +230,12 @@ void DispatchPendingEvents() {
 }
 
 void QueueTDSEvent(PEVENT_ITEM item) {
-    // [INDUSTRIAL UPDATE] Lock-Free Push to SList.
-    // Memory allocation alignment is handled by the lookaside list natively on x64.
+    if (InterlockedIncrement(&g_EventCount) > EVENT_QUEUE_LIMIT) {
+        InterlockedDecrement(&g_EventCount);
+        ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+        return;
+    }
     InterlockedPushEntrySList(&g_EventQueueHead, &item->ListEntry);
-    DispatchPendingEvents();
 }
 
 void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_INCOMING_METADATA_VALUES0* inMetaValues, void* layerData, const void* classifyContext, const FWPS_FILTER0* filter, UINT64 flowContext, FWPS_CLASSIFY_OUT0* classifyOut) {
@@ -163,7 +245,11 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
         ULONG pid = (ULONG)inMetaValues->processId;
         if (inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V4 || inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V6) {
             UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_DATAGRAM_DATA_V4_IP_REMOTE_PORT].value.uint16;
-            if (port == 53 && inMetaValues->packetSize > 512) { classifyOut->actionType = FWP_ACTION_BLOCK; return; }
+            if (!g_Policy.ObserveOnly && g_Policy.AllowNetworkContainment &&
+                port == 53 && inMetaValues->packetSize > 512) {
+                classifyOut->actionType = FWP_ACTION_BLOCK;
+                return;
+            }
         }
         PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
         if (item) {
@@ -190,7 +276,7 @@ NTSTATUS InitializeWFP(PDEVICE_OBJECT DeviceObject) {
     return STATUS_SUCCESS;
 }
 
-OB_PRE_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
+OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
     UNREFERENCED_PARAMETER(RegistrationContext); PEPROCESS targetProcess = NULL;
     if (OperationInformation->ObjectType == *PsProcessType) targetProcess = (PEPROCESS)OperationInformation->Object;
     else if (OperationInformation->ObjectType == *PsThreadType) targetProcess = IoThreadToProcess((PETHREAD)OperationInformation->Object);
@@ -225,23 +311,57 @@ CONST FLT_REGISTRATION FilterRegistration = { sizeof(FLT_REGISTRATION), FLT_REGI
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
     UNREFERENCED_PARAMETER(RegistryPath); UNICODE_STRING deviceName, symLink;
     RtlInitUnicodeString(&deviceName, L"\\Device\\TDS_Core_Kernel"); RtlInitUnicodeString(&symLink, L"\\DosDevices\\TDS_Core_Link");
-    IoCreateDevice(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_DeviceObject);
-    IoCreateSymbolicLink(&symLink, &deviceName);
+    NTSTATUS status = IoCreateDevice(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_DeviceObject);
+    if (!NT_SUCCESS(status)) return status;
+    status = IoCreateSymbolicLink(&symLink, &deviceName);
+    if (!NT_SUCCESS(status)) { IoDeleteDevice(g_DeviceObject); g_DeviceObject = NULL; return status; }
     DriverObject->DriverUnload = DriverUnload;
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = TDSDispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = TDSDispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = TDSDispatchDeviceControl;
     
     // [INDUSTRIAL UPDATE] Initialize SList
     InitializeListHead(&g_PendingIrpList); KeInitializeSpinLock(&g_IrpQueueLock);
     InitializeSListHead(&g_EventQueueHead);
     
     ExInitializeNpagedLookasideList(&g_EventLookasideList, NULL, NULL, 0, MAX_EVENT_BUFFER_SIZE + sizeof(EVENT_ITEM), 'SDTe', 0);
-    PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, FALSE);
-    InitializeWFP(g_DeviceObject); FltRegisterFilter(DriverObject, &FilterRegistration, &g_FilterHandle); FltStartFiltering(g_FilterHandle);
+    status = PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, FALSE);
+    if (!NT_SUCCESS(status)) { IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    status = InitializeWFP(g_DeviceObject);
+    if (!NT_SUCCESS(status)) { PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    status = RegisterProtectionCallbacks();
+    if (!NT_SUCCESS(status)) {
+        PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+        IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
+    }
+    status = FltRegisterFilter(DriverObject, &FilterRegistration, &g_FilterHandle);
+    if (NT_SUCCESS(status)) status = FltStartFiltering(g_FilterHandle);
+    if (!NT_SUCCESS(status)) {
+        if (g_FilterHandle) { FltUnregisterFilter(g_FilterHandle); g_FilterHandle = NULL; }
+        if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
+        PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+        IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
+    }
     return STATUS_SUCCESS;
 }
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
+    UNREFERENCED_PARAMETER(DriverObject);
     UNICODE_STRING symLink; RtlInitUnicodeString(&symLink, L"\\DosDevices\\TDS_Core_Link"); IoDeleteSymbolicLink(&symLink);
+    if (g_FilterHandle) { FltUnregisterFilter(g_FilterHandle); g_FilterHandle = NULL; }
+    if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
+    if (g_EngineHandle) {
+        if (g_FilterIdV4) FwpmFilterDeleteById0(g_EngineHandle, g_FilterIdV4);
+        if (g_CalloutIdV4) FwpsCalloutUnregisterById0(g_CalloutIdV4);
+        FwpmSubLayerDeleteByKey0(g_EngineHandle, &TDS_SUBLAYER_GUID);
+        FwpmEngineClose0(g_EngineHandle); g_EngineHandle = NULL;
+    }
     PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+    PSLIST_ENTRY entry;
+    while ((entry = InterlockedPopEntrySList(&g_EventQueueHead)) != NULL) {
+        PEVENT_ITEM item = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
+        ExFreeFromNpagedLookasideList(&g_EventLookasideList, item);
+    }
     ExDeleteNpagedLookasideList(&g_EventLookasideList);
     IoDeleteDevice(g_DeviceObject);
 }
@@ -250,8 +370,15 @@ void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTI
     UNREFERENCED_PARAMETER(Process);
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
     if (item) {
-        PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1); h->Type = CreateInfo ? TDSEventProcessCreate : TDSEventProcessTerminate;
+        RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + sizeof(TDS_PROCESS_EVENT_DATA));
+        PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1);
+        h->Type = CreateInfo ? TDSEventProcessCreate : TDSEventProcessTerminate;
+        h->DataSize = CreateInfo ? sizeof(TDS_PROCESS_EVENT_DATA) : 0;
+        if (CreateInfo) {
+            PTDS_PROCESS_EVENT_DATA data = (PTDS_PROCESS_EVENT_DATA)(h + 1);
+            data->Create = TRUE;
+            data->ParentProcessId = CreateInfo->ParentProcessId ? HandleToUlong(CreateInfo->ParentProcessId) : 0;
+        }
         h->ProcessId = HandleToUlong(ProcessId); QueueTDSEvent(item);
     }
 }
-

@@ -4,7 +4,9 @@
 #include <string>
 #include <unordered_set>
 #include "../TDSCommon/TDSCommon.h"
+#ifdef TDS_HAS_YARA
 #include <yara.h>
+#endif
 
 namespace TDS {
 
@@ -21,12 +23,15 @@ public:
     static void ScanAllProcesses();
 
 private:
+#ifdef TDS_HAS_YARA
     static int YaraCallback(YR_SCAN_CONTEXT* context, int message, void* message_data, void* user_data);
+#endif
     static void AnalyzeProcessMemory(DWORD pid, const std::wstring& processName);
     static bool IsJitEnabledProcess(const std::wstring& processName);
 
+#ifdef TDS_HAS_YARA
     static YR_RULES* s_yaraRules;
+#endif
 };
 
 } // namespace TDS
-

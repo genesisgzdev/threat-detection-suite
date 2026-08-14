@@ -20,7 +20,7 @@
 
 #pragma comment(lib, "advapi32.lib")
 
-#define TDS_DRIVER_DEVICE_NAME "\\\\.\\ThreatDetectionKernel"
+#define TDS_DRIVER_DEVICE_NAME "\\\\.\\TDS_Core_Link"
 
 static std::atomic<bool> global_monitoring_active{true};
 
@@ -89,6 +89,10 @@ private:
     HANDLE m_hDevice;
 
     void DisplayEvent(PTDS_EVENT_HEADER header) {
+        if (!header || header->DataSize > MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER)) {
+            std::cerr << "[!] Rejected malformed kernel event" << std::endl;
+            return;
+        }
         const char* typeStr = "UNKNOWN";
         switch (header->Type) {
             case TDSEventProcessCreate:    typeStr = "PROC_CREATE"; break;
@@ -104,14 +108,19 @@ private:
 
         printf("[%12s] PID: %6u TID: %6u ", typeStr, header->ProcessId, header->ThreadId);
 
+        const BYTE* payload = reinterpret_cast<const BYTE*>(header) + sizeof(TDS_EVENT_HEADER);
+        const ULONG payloadSize = header->DataSize;
+
         if (header->Type == TDSEventProcessCreate) {
-            PTDS_PROCESS_EVENT_DATA ev = (PTDS_PROCESS_EVENT_DATA)((BYTE*)header + sizeof(TDS_EVENT_HEADER));
-            if (ev->ImagePathOffset) {
+            if (payloadSize < sizeof(TDS_PROCESS_EVENT_DATA)) { printf("[malformed]\n"); return; }
+            PTDS_PROCESS_EVENT_DATA ev = (PTDS_PROCESS_EVENT_DATA)payload;
+            if (ev->ImagePathOffset < payloadSize && ev->ImagePathOffset % sizeof(WCHAR) == 0) {
                 wprintf(L"Path: %s ", (WCHAR*)((BYTE*)ev + ev->ImagePathOffset));
             }
         } else if (header->Type == TDSEventImageLoad) {
-            PTDS_IMAGE_LOAD_DATA ev = (PTDS_IMAGE_LOAD_DATA)((BYTE*)header + sizeof(TDS_EVENT_HEADER));
-            if (ev->ImagePathOffset) {
+            if (payloadSize < sizeof(TDS_IMAGE_LOAD_DATA)) { printf("[malformed]\n"); return; }
+            PTDS_IMAGE_LOAD_DATA ev = (PTDS_IMAGE_LOAD_DATA)payload;
+            if (ev->ImagePathOffset < payloadSize && ev->ImagePathOffset % sizeof(WCHAR) == 0) {
                 wprintf(L"Module: %s ", (WCHAR*)((BYTE*)ev + ev->ImagePathOffset));
             }
         }
@@ -180,4 +189,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-

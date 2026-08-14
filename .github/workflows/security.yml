@@ -1,10 +1,22 @@
-name: Security Audit (Manual)
+name: Security Audit
 on:
   workflow_dispatch:
+  push:
+  pull_request:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
-      - name: Report
-        run: echo "Manual security audit ready."
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

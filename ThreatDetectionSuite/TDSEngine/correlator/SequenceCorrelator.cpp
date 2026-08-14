@@ -16,7 +16,7 @@ SequenceCorrelator::~SequenceCorrelator() {
 void SequenceCorrelator::Analyze(const Event& event) {
     if (event.Type == TDSEventProcessCreate) {
         if (auto data = std::get_if<ProcessEvent>(&event.Data)) {
-            m_processStates[event.Pid] = { event.Pid, data->Created, false, event.Timestamp };
+            m_processStates[event.Pid] = { event.Pid, false, false, event.Timestamp };
         }
         return;
     }

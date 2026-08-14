@@ -1,5 +1,18 @@
 # Threat Detection Suite (TDS)
 
+> **Development status:** TDS is an active Windows 10/11 x64 engineering project.
+> The user-mode event contract, bounded kernel queue, service ingestion path and
+> observe-first response policy are being hardened. Do not deploy the driver on
+> production hosts until the Windows/WDK, Driver Verifier and isolated ATT&CK
+> acceptance suites pass. The default response mode is `observe`.
+
+## Runtime configuration
+
+- `TDS_RESPONSE_MODE=observe|alert|contain|terminate` controls staged response.
+- `TDS_LOG_PATH` selects the JSONL output path; the default is the current working directory.
+- `TDS_FORENSICS=1` enables critical-alert process dumps; it is disabled by default.
+- `TDS_ENABLE_YARA` is a CMake option and defaults to `OFF` unless a YARA SDK is supplied.
+
 ## System Architecture
 
 The Threat Detection Suite (TDS) operates across two primary execution rings: Kernel-Mode (Ring 0) and User-Mode (Ring 3). This separation ensures that high-latency heuristic analysis does not induce system-wide DPC (Deferred Procedure Call) latency or bug checks (BSOD).

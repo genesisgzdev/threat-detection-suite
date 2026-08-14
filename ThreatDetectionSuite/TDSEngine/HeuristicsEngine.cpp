@@ -56,17 +56,24 @@ void HeuristicsEngine::EvaluateRisk(uint32_t pid) {
             pid
         );
 
-        TriggerRemediation(pid, reason);
+        TriggerRemediation(pid, it->second.Score, reason);
         
         // Reset score after alert to prevent spamming, or erase context
         it->second.Score = 0; 
     }
 }
 
-void HeuristicsEngine::TriggerRemediation(uint32_t pid, const std::string& reason) {
-    std::cout << "[IPS] Remediating PID " << pid << " due to: " << reason << std::endl;
-    IPSManager::ContainProcess(pid);
-    IPSManager::TerminateMaliciousProcess(pid);
+void HeuristicsEngine::TriggerRemediation(uint32_t pid, int score, const std::string& reason) {
+    if (m_responsePolicy.AllowsTermination(score)) {
+        std::cout << "[IPS] Terminating PID " << pid << " due to: " << reason << std::endl;
+        IPSManager::ContainProcess(pid);
+        IPSManager::TerminateMaliciousProcess(pid);
+    } else if (m_responsePolicy.AllowsContainment(score)) {
+        std::cout << "[IPS] Containing PID " << pid << " due to: " << reason << std::endl;
+        IPSManager::ContainProcess(pid);
+    } else {
+        std::cout << "[IPS] Observe-only decision for PID " << pid << ": " << reason << std::endl;
+    }
 }
 
 } // namespace TDS

@@ -3,7 +3,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
-#include "TDSCommon.h"
+#include "../ThreatDetectionSuite/TDSCommon/TDSCommon.h"
 
 /**
  * TDS Driver Fuzzer & Stress Test Utility
@@ -48,7 +48,7 @@ void FuzzWorker(HANDLE hDevice) {
 int main() {
     std::cout << "[*] Initializing TDS Driver Stress Test..." << std::endl;
 
-    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Kernel", GENERIC_READ | GENERIC_WRITE, 
+    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Link", GENERIC_READ | GENERIC_WRITE,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
 
     if (hDevice == INVALID_HANDLE_VALUE) {
@@ -80,4 +80,3 @@ int main() {
     CloseHandle(hDevice);
     return 0;
 }
-

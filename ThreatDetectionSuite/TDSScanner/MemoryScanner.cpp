@@ -6,6 +6,7 @@
 #include <winternl.h>
 #include "../TDSEngine/Logger.h"
 #include "../TDSEngine/ips/IPSManager.h"
+#include "../TDSEngine/ResponsePolicy.h"
 
 #pragma comment(lib, "ntdll.lib")
 
@@ -37,9 +38,15 @@ static std::string WStringToString(const std::wstring& wstr) {
 
 // --- MemoryScanner Implementation ---
 
+#ifdef TDS_HAS_YARA
 YR_RULES* MemoryScanner::s_yaraRules = nullptr;
+#endif
 
 bool MemoryScanner::InitializeYara(const std::string& rulePath) {
+#ifndef TDS_HAS_YARA
+    (void)rulePath;
+    return false;
+#else
     if (yr_initialize() != ERROR_SUCCESS) return false;
 
     YR_COMPILER* compiler = nullptr;
@@ -64,16 +71,20 @@ bool MemoryScanner::InitializeYara(const std::string& rulePath) {
     
     Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_PROCESS_BEHAVIOR, "YARA Memory Engine Initialized", rulePath, 0);
     return true;
+#endif
 }
 
 void MemoryScanner::ShutdownYara() {
+#ifdef TDS_HAS_YARA
     if (s_yaraRules) {
         yr_rules_destroy(s_yaraRules);
         s_yaraRules = nullptr;
     }
     yr_finalize();
+#endif
 }
 
+#ifdef TDS_HAS_YARA
 int MemoryScanner::YaraCallback(YR_SCAN_CONTEXT* context, int message, void* message_data, void* user_data) {
     if (message == CALLBACK_MSG_RULE_MATCHING) {
         YR_RULE* rule = (YR_RULE*)message_data;
@@ -82,11 +93,17 @@ int MemoryScanner::YaraCallback(YR_SCAN_CONTEXT* context, int message, void* mes
         std::string ruleName = rule->identifier;
         Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_MEMORY_ANOMALY, "YARA Rule Match in Memory: " + ruleName, "Memory Payload", pid);
         
-        IPSManager::ContainProcess(pid);
-        IPSManager::TerminateMaliciousProcess(pid);
+        ResponsePolicy policy = ResponsePolicy::FromEnvironment();
+        if (policy.AllowsTermination(100)) {
+            IPSManager::ContainProcess(pid);
+            IPSManager::TerminateMaliciousProcess(pid);
+        } else if (policy.AllowsContainment(100)) {
+            IPSManager::ContainProcess(pid);
+        }
     }
     return CALLBACK_CONTINUE;
 }
+#endif
 
 bool MemoryScanner::DetectNopSleds(HANDLE hProcess, LPVOID startAddress, SIZE_T regionSize) {
     const SIZE_T CHUNK_SIZE = 4096; 
@@ -355,6 +372,7 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
                     Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_MEMORY_ANOMALY, "Direct Syscall detected in private memory", sName, pid);
                 }
 
+#ifdef TDS_HAS_YARA
                 if (s_yaraRules && mbi.Type == MEM_PRIVATE) {
                     SIZE_T toRead = min(mbi.RegionSize, (SIZE_T)(10 * 1024 * 1024));
                     std::vector<uint8_t> buffer(toRead);
@@ -362,6 +380,7 @@ void MemoryScanner::AnalyzeProcessMemory(DWORD pid, const std::wstring& processN
                         yr_rules_scan_mem(s_yaraRules, buffer.data(), toRead, 0, YaraCallback, &pid, 0);
                     }
                 }
+#endif
             }
         }
 

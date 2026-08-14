@@ -26,7 +26,7 @@ public:
      */
     bool CaptureProcessDump(DWORD pid, const std::string& threatType) {
         HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-        if (hProcess == INVALID_HANDLE_VALUE) return false;
+        if (hProcess == NULL || hProcess == INVALID_HANDLE_VALUE) return false;
 
         char dumpPath[MAX_PATH];
         SYSTEMTIME st;
@@ -62,4 +62,3 @@ private:
 };
 
 } // namespace TDS
-

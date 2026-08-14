@@ -5,7 +5,10 @@
 #include <mutex>
 #include <fstream>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include "../TDSCommon/TDSCommon.h"
+#include "../TDSCommon/TDSThreats.h"
 #include "ForensicManager.h"
 
 namespace TDS {
@@ -21,8 +24,8 @@ public:
                    const std::string& description, const std::string& ioc, uint32_t pid) {
         std::lock_guard<std::mutex> lock(m_mutex);
         
-        // Automated Forensics: Capture memory dump for CRITICAL alerts
-        if (severity >= TDS_SEVERITY_CRITICAL && pid != 0) {
+        const char* forensics = std::getenv("TDS_FORENSICS");
+        if (severity >= TDS_SEVERITY_CRITICAL && pid != 0 && forensics && std::string(forensics) == "1") {
             ForensicManager::Instance().CaptureProcessDump(pid, GetTDSCategoryName(category));
         }
 
@@ -58,16 +61,43 @@ public:
 
 private:
     Logger() : m_counter(0) {}
+    ~Logger() { FlushToDiskInternal(); }
+
+    static std::string EscapeJson(const char* value) {
+        std::string escaped;
+        for (const unsigned char* p = reinterpret_cast<const unsigned char*>(value); p && *p; ++p) {
+            switch (*p) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped.push_back(static_cast<char>(*p)); break;
+            }
+        }
+        return escaped;
+    }
     
     void FlushToDiskInternal() {
-        std::ofstream ofs("tds_threat_events.jsonl", std::ios::app);
+        const char* configuredPath = std::getenv("TDS_LOG_PATH");
+        std::string path = configuredPath && *configuredPath ? configuredPath : "C:\\ProgramData\\TDS\\tds_threat_events.jsonl";
+        if (!configuredPath || !*configuredPath) CreateDirectoryA("C:\\ProgramData", NULL);
+        if (!configuredPath || !*configuredPath) CreateDirectoryA("C:\\ProgramData\\TDS", NULL);
+
+        std::error_code fileError;
+        auto size = std::filesystem::file_size(path, fileError);
+        if (!fileError && size >= 64ULL * 1024ULL * 1024ULL) {
+            std::filesystem::rename(path, path + ".1", fileError);
+        }
+
+        std::ofstream ofs(path, std::ios::app);
         if (ofs.is_open()) {
             for (const auto& log : m_buffer) {
                 ofs << "{\"id\": " << log.ThreatId 
                     << ", \"severity\": \"" << GetTDSSeverityName(log.Severity) << "\""
                     << ", \"category\": \"" << GetTDSCategoryName(log.Category) << "\""
-                    << ", \"description\": \"" << log.Description << "\""
-                    << ", \"ioc\": \"" << log.Ioc << "\""
+                    << ", \"description\": \"" << EscapeJson(log.Description) << "\""
+                    << ", \"ioc\": \"" << EscapeJson(log.Ioc) << "\""
                     << ", \"timestamp\": " << log.Timestamp
                     << ", \"pid\": " << log.AssociatedPid << "}\n";
             }
@@ -81,4 +111,3 @@ private:
 };
 
 } // namespace TDS
-

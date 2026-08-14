@@ -1,11 +1,13 @@
 #include "EtwCollector.h"
 #include <iostream>
 #include <thread>
+#include <chrono>
+#include <utility>
 
 namespace TDS {
 static const GUID Microsoft_Windows_Threat_Intelligence = { 0xf4e1897c, 0xbb5d, 0x5668, { 0xf1, 0xd8, 0x04, 0x0f, 0x4d, 0x8d, 0xd3, 0x44 } };
 
-EtwCollector::EtwCollector() : m_traceHandle(INVALID_PROCESSTRACE_HANDLE), m_sessionHandle(0), m_isRunning(false) {
+EtwCollector::EtwCollector(EventHandler handler) : m_traceHandle(INVALID_PROCESSTRACE_HANDLE), m_sessionHandle(0), m_isRunning(false), m_handler(std::move(handler)) {
     m_sessionName = "TDS_ETW_TI_Session";
 }
 
@@ -31,18 +33,19 @@ bool EtwCollector::Start() {
     logFile.LoggerName = (LPSTR)m_sessionName.c_str();
     logFile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
     logFile.EventRecordCallback = EventRecordCallback;
+    logFile.Context = this;
 
     m_traceHandle = OpenTraceA(&logFile);
     if (m_traceHandle == INVALID_PROCESSTRACE_HANDLE) { Stop(); free(traceProp); return false; }
 
     m_isRunning = true;
-    std::thread([this]() { ProcessTrace(&m_traceHandle, 1, 0, 0); }).detach();
+    m_traceThread = std::thread([this]() { ProcessTrace(&m_traceHandle, 1, 0, 0); });
     free(traceProp);
     return true;
 }
 
 void EtwCollector::Stop() {
-    if (m_isRunning) {
+    if (m_isRunning || m_sessionHandle != 0 || m_traceHandle != INVALID_PROCESSTRACE_HANDLE) {
         m_isRunning = false;
         if (m_traceHandle != INVALID_PROCESSTRACE_HANDLE) { CloseTrace(m_traceHandle); m_traceHandle = INVALID_PROCESSTRACE_HANDLE; }
         ULONG bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + m_sessionName.length() + 1;
@@ -54,11 +57,23 @@ void EtwCollector::Stop() {
         }
         m_sessionHandle = 0;
     }
+    if (m_traceThread.joinable()) m_traceThread.join();
 }
 
 void WINAPI EtwCollector::EventRecordCallback(PEVENT_RECORD pEvent) {
-    if (pEvent->EventHeader.EventDescriptor.Id == 5) {
-        // Queue APC Injection event to engine
-    }
+    if (!pEvent || !pEvent->UserContext) return;
+    static_cast<EtwCollector*>(pEvent->UserContext)->HandleEvent(pEvent);
+}
+
+void EtwCollector::HandleEvent(PEVENT_RECORD pEvent) {
+    if (!m_handler || !pEvent) return;
+    if (pEvent->EventHeader.EventDescriptor.Id != 5) return;
+    Event event{};
+    event.Type = TDSEventEtwTiApcInjection;
+    event.Pid = pEvent->EventHeader.ProcessId;
+    event.Tid = pEvent->EventHeader.ThreadId;
+    event.Timestamp = pEvent->EventHeader.TimeStamp.QuadPart;
+    event.Data = RemoteThreadEvent{event.Pid};
+    m_handler(event);
 }
 }

@@ -12,6 +12,7 @@
 #include "../TDSCommon/TDSEvents.h"
 #include "EventBus.h"
 #include "correlator/SequenceCorrelator.h"
+#include "ResponsePolicy.h"
 
 namespace TDS {
 
@@ -79,6 +80,7 @@ private:
     
     std::unique_ptr<EventBus> m_eventBus;
     std::unique_ptr<SequenceCorrelator> m_correlator;
+    ResponsePolicy m_responsePolicy = ResponsePolicy::FromEnvironment();
     
     std::thread m_analysisThread;
     std::atomic<bool> m_running{false};
@@ -86,4 +88,3 @@ private:
 };
 
 } // namespace TDS
-

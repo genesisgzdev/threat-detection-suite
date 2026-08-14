@@ -3,6 +3,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <optional>
+#include <chrono>
 #include "../TDSCommon/TDSEvents.h"
 
 namespace TDS {
@@ -11,6 +12,10 @@ class EventBus {
 public:
     void Push(const Event& event) {
         std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_stop || m_queue.size() >= m_capacity) {
+            ++m_dropped;
+            return;
+        }
         m_queue.push(event);
         m_cv.notify_one();
     }
@@ -33,12 +38,18 @@ public:
         m_cv.notify_all();
     }
 
+    size_t Dropped() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_dropped;
+    }
+
 private:
     std::queue<Event> m_queue;
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     bool m_stop{false};
+    const size_t m_capacity{10000};
+    size_t m_dropped{0};
 };
 
 } // namespace TDS
-

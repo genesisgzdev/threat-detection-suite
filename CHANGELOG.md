@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Security and runtime hardening
+
+- Unified the driver/user event ABI and corrected the TDS device/IOCTL contract.
+- Added bounded kernel event delivery, validated buffers, policy input and driver lifecycle cleanup.
+- Connected `TDSService` to kernel events and ETW-TI callback delivery.
+- Made response enforcement observe-first with explicit `contain` and `terminate` modes.
+- Added local log rotation, optional forensics, OTLP/HTTP export and Windows service recovery tooling.
+- Added Windows user-mode CI, shared-contract checks, WDK project metadata and WiX packaging inputs.
+
 All notable changes to the Threat Detection Suite (TDS) project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

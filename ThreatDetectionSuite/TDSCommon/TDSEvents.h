@@ -26,7 +26,7 @@ struct RemoteThreadEvent {
 };
 
 struct NetworkEvent {
-    uint8_t AddressFamily;
+    uint32_t AddressFamily;
     uint8_t Protocol;
     uint16_t RemotePort;
     uint32_t RemoteAddress;

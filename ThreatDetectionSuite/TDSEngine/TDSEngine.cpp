@@ -78,8 +78,12 @@ void TDSEngine::EvaluateThreat(const Event& event) {
                         for (auto c : data->CommandLine) cmd += (char)c;
                         Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_LOLBIN_ABUSE, "Critical LOLBin abuse detected", cmd, event.Pid);
                         
-                        IPSManager::ContainProcess(event.Pid);
-                        IPSManager::TerminateMaliciousProcess(event.Pid);
+                        if (m_responsePolicy.AllowsTermination(score)) {
+                            IPSManager::ContainProcess(event.Pid);
+                            IPSManager::TerminateMaliciousProcess(event.Pid);
+                        } else if (m_responsePolicy.AllowsContainment(score)) {
+                            IPSManager::ContainProcess(event.Pid);
+                        }
                     } else if (score >= 50) {
                         std::string cmd;
                         for (auto c : data->CommandLine) cmd += (char)c;
@@ -93,8 +97,12 @@ void TDSEngine::EvaluateThreat(const Event& event) {
             if (auto data = std::get_if<RemoteThreadEvent>(&event.Data)) {
                 Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Remote thread injection detected", "Target PID: " + std::to_string(data->TargetPid), event.Pid);
                 
-                IPSManager::ContainProcess(event.Pid);
-                IPSManager::TerminateMaliciousProcess(event.Pid);
+                if (m_responsePolicy.AllowsTermination(95)) {
+                    IPSManager::ContainProcess(event.Pid);
+                    IPSManager::TerminateMaliciousProcess(event.Pid);
+                } else if (m_responsePolicy.AllowsContainment(95)) {
+                    IPSManager::ContainProcess(event.Pid);
+                }
             }
             break;
         }

@@ -1,8 +1,17 @@
 #pragma once
+
+#ifdef _KERNEL_MODE
 #include <ntdef.h>
+#include <ntifs.h>
+#else
+#include <windows.h>
+#include <winioctl.h>
+#include <stdint.h>
+#endif
 
 #define IOCTL_TDS_SET_PROTECTION_POLICY CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_TDS_GET_NEXT_EVENT        CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
+#define IOCTL_TDS_GET_NEXT_EVENT        CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_TDS_SET_RUNTIME_POLICY    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 #define MAX_EVENT_BUFFER_SIZE 4096
 #define EVENT_QUEUE_LIMIT 10000
@@ -22,7 +31,10 @@ typedef enum _TDS_EVENT_TYPE {
     TDSEventRansomwareActivity,
     TDSEventVssDeletion,
     TDSEventNetworkConnect,
-    TDSEventEtwTiApcInjection
+    TDSEventEtwTiApcInjection,
+    TDSEventHandleOp,
+    TDSEventApcInjection,
+    TDSEventRegistryOp
 } TDS_EVENT_TYPE;
 
 typedef struct _TDS_EVENT_HEADER {
@@ -32,6 +44,20 @@ typedef struct _TDS_EVENT_HEADER {
     ULONG DataSize;
     LARGE_INTEGER Timestamp;
 } TDS_EVENT_HEADER, *PTDS_EVENT_HEADER;
+
+typedef struct _TDS_PROTECTION_POLICY {
+    ULONG Version;
+    ULONG Size;
+    ULONG Flags;
+    ULONG ObserveOnly;
+    ULONG AllowProcessTermination;
+    ULONG AllowNetworkContainment;
+    ULONG Reserved[3];
+} TDS_PROTECTION_POLICY, *PTDS_PROTECTION_POLICY;
+
+#define TDS_POLICY_FLAG_PROTECT_SERVICE 0x00000001UL
+#define TDS_POLICY_FLAG_ENABLE_WFP      0x00000002UL
+#define TDS_POLICY_FLAG_ENABLE_MINIFILTER 0x00000004UL
 
 typedef struct _TDS_PROCESS_EVENT_DATA {
     BOOLEAN Create;

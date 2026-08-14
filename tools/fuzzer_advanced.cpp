@@ -2,11 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <random>
-
-// Define IOCTLs (matching common patterns for TDSCommon.h)
-#define FILE_DEVICE_UNKNOWN             0x00000022
-#define IOCTL_TDS_GET_NEXT_EVENT        CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_TDS_SET_PROTECTION_POLICY CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#include "../ThreatDetectionSuite/TDSCommon/TDSCommon.h"
 
 // Function to generate random bytes for fuzzing payload
 void GenerateRandomBytes(std::vector<uint8_t>& buffer) {

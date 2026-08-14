@@ -4,12 +4,7 @@
 #include <vector>
 #include <atomic>
 #include <winioctl.h>
-
-// Definitions from TDSCommon.h to ensure compilation success
-#define TDS_DEVICE_TYPE 0x8000
-#define IOCTL_TDS_GET_NEXT_EVENT \
-    CTL_CODE(TDS_DEVICE_TYPE, 0x810, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define MAX_EVENT_BUFFER_SIZE 4096
+#include "../ThreatDetectionSuite/TDSCommon/TDSCommon.h"
 
 /**
  * TDS Driver Fuzzer & Stress Test Utility (Standalone)
@@ -51,7 +46,7 @@ void FuzzWorker(HANDLE hDevice) {
 int main() {
     std::cout << "[*] Initializing Standalone TDS Driver Stress Test..." << std::endl;
 
-    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Kernel", GENERIC_READ | GENERIC_WRITE, 
+    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Link", GENERIC_READ | GENERIC_WRITE,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
 
     if (hDevice == INVALID_HANDLE_VALUE) {
@@ -84,4 +79,3 @@ int main() {
     CloseHandle(hDevice);
     return 0;
 }
-
