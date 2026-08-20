@@ -3,6 +3,7 @@
 #include <fltKernel.h>
 #include <fwpsk.h>
 #include <fwpmk.h>
+#include <wdmsec.h>
 #include <initguid.h>
 #include "../TDSCommon/TDSCommon.h"
 
@@ -21,6 +22,7 @@ ULONG g_EdrPid = 0;
 ULONG g_ServicePid = 0; 
 BOOLEAN g_MonitoringActive = FALSE;
 TDS_PROTECTION_POLICY g_Policy = { 1, sizeof(TDS_PROTECTION_POLICY), TDS_POLICY_FLAG_PROTECT_SERVICE, 1, 0, 0, {0, 0, 0} };
+KSPIN_LOCK g_PolicyLock;
 volatile LONG g_EventCount = 0;
 
 // WFP handles
@@ -33,12 +35,14 @@ UINT64 g_FilterIdV4 = 0;
 UINT64 g_FilterIdV6 = 0;
 UINT64 g_FilterIdDgV4 = 0;
 UINT64 g_FilterIdDgV6 = 0;
+BOOLEAN g_WfpSubLayerAdded = FALSE;
 
 DEFINE_GUID(TDS_WFP_CALLOUT_V4_GUID, 0xeb6a1f3c, 0x7d4e, 0x4b2a, 0x9c, 0x8d, 0x1e, 0x2f, 0x3a, 0x4b, 0x5c, 0x6d);
 DEFINE_GUID(TDS_WFP_CALLOUT_V6_GUID, 0xa1b2c3d4, 0xe5f6, 0x4a1b, 0x8c, 0x9d, 0xe0, 0xf1, 0xa2, 0xb3, 0xc4, 0xd5);
 DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V4_GUID, 0xf1e2d3c4, 0xb5a6, 0x4987, 0x8e, 0x7d, 0x6c, 0x5b, 0x4a, 0x39, 0x28, 0x17);
 DEFINE_GUID(TDS_WFP_CALLOUT_DATAGRAM_V6_GUID, 0xd1c2b3a4, 0x9e8d, 0x4c7b, 0x6a, 0x5f, 0x4e, 0x3d, 0x2c, 0x1b, 0x0a, 0x98);
 DEFINE_GUID(TDS_SUBLAYER_GUID, 0x29c786a3, 0x5a1b, 0x4f4f, 0xb4, 0x8a, 0x8e, 0x1f, 0x1d, 0x1c, 0x1b, 0x1a);
+DEFINE_GUID(TDS_DEVICE_CLASS_GUID, 0x4b4f7e1d, 0x7c31, 0x4d73, 0x9c, 0x32, 0xe7, 0x83, 0x20, 0x4d, 0x1a, 0x61);
 
 typedef struct _EVENT_ITEM {
     DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) SLIST_ENTRY ListEntry; // MUST BE FIRST
@@ -53,6 +57,21 @@ void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIM
 void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create);
 NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument2);
 OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation);
+BOOLEAN IsEdrProcess(PEPROCESS Process);
+
+static BOOLEAN IsAuthorizedPolicyCaller(PIRP Irp) {
+    HANDLE requestorPid = IoGetRequestorProcessId(Irp);
+    PEPROCESS requestorProcess = NULL;
+    BOOLEAN authorized = FALSE;
+
+    if (NT_SUCCESS(PsLookupProcessByProcessId(requestorPid, &requestorProcess))) {
+        // The device ACL limits access to SYSTEM/Administrators; the image check
+        // prevents an unrelated privileged process from claiming service control.
+        authorized = IsEdrProcess(requestorProcess);
+        ObDereferenceObject(requestorProcess);
+    }
+    return authorized;
+}
 
 static NTSTATUS RegisterProtectionCallbacks(void) {
     OB_OPERATION_REGISTRATION operations[2] = {0};
@@ -93,17 +112,37 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     ULONG inLength = stack->Parameters.DeviceIoControl.InputBufferLength;
     ULONG outLength = stack->Parameters.DeviceIoControl.OutputBufferLength;
 
+    NTSTATUS accessStatus = STATUS_SUCCESS;
+    if (code == IOCTL_TDS_SET_PROTECTION_POLICY || code == IOCTL_TDS_SET_RUNTIME_POLICY) {
+        accessStatus = IoValidateDeviceIoControlAccess(Irp, FILE_WRITE_ACCESS);
+    } else if (code == IOCTL_TDS_GET_NEXT_EVENT) {
+        accessStatus = IoValidateDeviceIoControlAccess(Irp, FILE_READ_ACCESS);
+    }
+    if (!NT_SUCCESS(accessStatus)) {
+        return CompleteIrp(Irp, accessStatus, 0);
+    }
+
     if (code == IOCTL_TDS_SET_PROTECTION_POLICY) {
+        if (!IsAuthorizedPolicyCaller(Irp)) {
+            return CompleteIrp(Irp, STATUS_ACCESS_DENIED, 0);
+        }
         if (inLength != sizeof(TDS_PROTECTION_POLICY) || Irp->AssociatedIrp.SystemBuffer == NULL) {
             return CompleteIrp(Irp, STATUS_INVALID_PARAMETER, 0);
         }
         PTDS_PROTECTION_POLICY requested = (PTDS_PROTECTION_POLICY)Irp->AssociatedIrp.SystemBuffer;
-        if (requested->Version != 1 || requested->Size != sizeof(TDS_PROTECTION_POLICY)) {
+        if (requested->Version != 1 || requested->Size != sizeof(TDS_PROTECTION_POLICY) ||
+            (requested->Flags & ~(TDS_POLICY_FLAG_PROTECT_SERVICE | TDS_POLICY_FLAG_ENABLE_WFP | TDS_POLICY_FLAG_ENABLE_MINIFILTER)) != 0 ||
+            requested->ObserveOnly > 1 || requested->AllowProcessTermination > 1 ||
+            requested->AllowNetworkContainment > 1 || requested->Reserved[0] != 0 ||
+            requested->Reserved[1] != 0 || requested->Reserved[2] != 0) {
             return CompleteIrp(Irp, STATUS_REVISION_MISMATCH, 0);
         }
+        KIRQL oldIrql;
+        KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
         g_Policy = *requested;
-        g_ServicePid = IoGetRequestorProcessId(Irp);
+        g_ServicePid = HandleToUlong(IoGetRequestorProcessId(Irp));
         g_MonitoringActive = requested->ObserveOnly ? FALSE : TRUE;
+        KeReleaseSpinLock(&g_PolicyLock, oldIrql);
         return CompleteIrp(Irp, STATUS_SUCCESS, 0);
     }
 
@@ -173,12 +212,17 @@ void QueueTDSEvent(PEVENT_ITEM item) {
 
 void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_INCOMING_METADATA_VALUES0* inMetaValues, void* layerData, const void* classifyContext, const FWPS_FILTER0* filter, UINT64 flowContext, FWPS_CLASSIFY_OUT0* classifyOut) {
     UNREFERENCED_PARAMETER(layerData); UNREFERENCED_PARAMETER(classifyContext); UNREFERENCED_PARAMETER(filter); UNREFERENCED_PARAMETER(flowContext);
+    TDS_PROTECTION_POLICY policy;
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
+    policy = g_Policy;
+    KeReleaseSpinLock(&g_PolicyLock, oldIrql);
     classifyOut->actionType = FWP_ACTION_PERMIT;
     if (inMetaValues->currentMetadataValues & FWPS_METADATA_FIELD_PROCESS_ID) {
         ULONG pid = (ULONG)inMetaValues->processId;
         if (inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V4 || inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V6) {
             UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_DATAGRAM_DATA_V4_IP_REMOTE_PORT].value.uint16;
-            if (!g_Policy.ObserveOnly && g_Policy.AllowNetworkContainment &&
+            if (!policy.ObserveOnly && policy.AllowNetworkContainment &&
                 port == 53 && inMetaValues->packetSize > 512) {
                 classifyOut->actionType = FWP_ACTION_BLOCK;
                 return;
@@ -195,18 +239,35 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
     }
 }
 
+static VOID CleanupWFP(VOID) {
+    if (g_EngineHandle) {
+        if (g_FilterIdV4) { FwpmFilterDeleteById0(g_EngineHandle, g_FilterIdV4); g_FilterIdV4 = 0; }
+        if (g_CalloutIdV4) { FwpsCalloutUnregisterById0(g_CalloutIdV4); g_CalloutIdV4 = 0; }
+        if (g_WfpSubLayerAdded) {
+            FwpmSubLayerDeleteByKey0(g_EngineHandle, &TDS_SUBLAYER_GUID);
+            g_WfpSubLayerAdded = FALSE;
+        }
+        FwpmEngineClose0(g_EngineHandle);
+        g_EngineHandle = NULL;
+    }
+}
+
 NTSTATUS InitializeWFP(PDEVICE_OBJECT DeviceObject) {
     FWPM_SESSION0 session = {0}; session.flags = FWPM_SESSION_FLAG_DYNAMIC;
     NTSTATUS status = FwpmEngineOpen0(NULL, RPC_C_AUTHN_WINNT, NULL, &session, &g_EngineHandle);
     if (!NT_SUCCESS(status)) return status;
     FWPM_SUBLAYER0 subLayer = {0}; subLayer.subLayerKey = TDS_SUBLAYER_GUID; subLayer.displayData.name = L"TDS Sublayer"; subLayer.weight = 0xFFFF;
-    FwpmSubLayerAdd0(g_EngineHandle, &subLayer, NULL);
+    status = FwpmSubLayerAdd0(g_EngineHandle, &subLayer, NULL);
+    if (!NT_SUCCESS(status)) { CleanupWFP(); return status; }
+    g_WfpSubLayerAdded = TRUE;
     FWPS_CALLOUT0 sCallout = {0}; sCallout.classifyFn = WfpClassifyOutbound; sCallout.calloutKey = TDS_WFP_CALLOUT_V4_GUID;
-    FwpsCalloutRegister0(DeviceObject, &sCallout, &g_CalloutIdV4);
+    status = FwpsCalloutRegister0(DeviceObject, &sCallout, &g_CalloutIdV4);
+    if (!NT_SUCCESS(status)) { CleanupWFP(); return status; }
     FWPM_FILTER0 filter = {0}; filter.subLayerKey = TDS_SUBLAYER_GUID; filter.action.type = FWP_ACTION_CALLOUT_TERMINATING;
     filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4; filter.action.calloutKey = TDS_WFP_CALLOUT_V4_GUID;
-    FwpmFilterAdd0(g_EngineHandle, &filter, NULL, &g_FilterIdV4);
-    return STATUS_SUCCESS;
+    status = FwpmFilterAdd0(g_EngineHandle, &filter, NULL, &g_FilterIdV4);
+    if (!NT_SUCCESS(status)) { CleanupWFP(); return status; }
+    return status;
 }
 
 OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation) {
@@ -242,9 +303,11 @@ CONST FLT_OPERATION_REGISTRATION Callbacks[] = { { IRP_MJ_WRITE, 0, TDSPreWriteC
 CONST FLT_REGISTRATION FilterRegistration = { sizeof(FLT_REGISTRATION), FLT_REGISTRATION_VERSION, 0, NULL, Callbacks, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
-    UNREFERENCED_PARAMETER(RegistryPath); UNICODE_STRING deviceName, symLink;
+    UNREFERENCED_PARAMETER(RegistryPath); UNICODE_STRING deviceName, symLink, deviceSddl;
     RtlInitUnicodeString(&deviceName, L"\\Device\\TDS_Core_Kernel"); RtlInitUnicodeString(&symLink, L"\\DosDevices\\TDS_Core_Link");
-    NTSTATUS status = IoCreateDevice(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_DeviceObject);
+    RtlInitUnicodeString(&deviceSddl, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)");
+    KeInitializeSpinLock(&g_PolicyLock);
+    NTSTATUS status = IoCreateDeviceSecure(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &deviceSddl, &TDS_DEVICE_CLASS_GUID, &g_DeviceObject);
     if (!NT_SUCCESS(status)) return status;
     status = IoCreateSymbolicLink(&symLink, &deviceName);
     if (!NT_SUCCESS(status)) { IoDeleteDevice(g_DeviceObject); g_DeviceObject = NULL; return status; }
@@ -264,6 +327,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
     status = RegisterProtectionCallbacks();
     if (!NT_SUCCESS(status)) {
         PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+        CleanupWFP();
         IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
     }
     status = FltRegisterFilter(DriverObject, &FilterRegistration, &g_FilterHandle);
@@ -272,6 +336,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
         if (g_FilterHandle) { FltUnregisterFilter(g_FilterHandle); g_FilterHandle = NULL; }
         if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
         PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+        CleanupWFP();
         IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
     }
     return STATUS_SUCCESS;
@@ -282,12 +347,7 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     UNICODE_STRING symLink; RtlInitUnicodeString(&symLink, L"\\DosDevices\\TDS_Core_Link"); IoDeleteSymbolicLink(&symLink);
     if (g_FilterHandle) { FltUnregisterFilter(g_FilterHandle); g_FilterHandle = NULL; }
     if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
-    if (g_EngineHandle) {
-        if (g_FilterIdV4) FwpmFilterDeleteById0(g_EngineHandle, g_FilterIdV4);
-        if (g_CalloutIdV4) FwpsCalloutUnregisterById0(g_CalloutIdV4);
-        FwpmSubLayerDeleteByKey0(g_EngineHandle, &TDS_SUBLAYER_GUID);
-        FwpmEngineClose0(g_EngineHandle); g_EngineHandle = NULL;
-    }
+    CleanupWFP();
     PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
     PSLIST_ENTRY entry;
     while ((entry = InterlockedPopEntrySList(&g_EventQueueHead)) != NULL) {

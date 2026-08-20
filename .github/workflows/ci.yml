@@ -44,4 +44,5 @@ jobs:
         shell: pwsh
         run: |
           python tests/contract_checks.py
+          pwsh -NoProfile -File tests/windows/driver_security_contract.ps1
           if (-not (Test-Path ThreatDetectionSuite/TDSDriver/TDSDriver.vcxproj)) { throw 'WDK project missing' }
