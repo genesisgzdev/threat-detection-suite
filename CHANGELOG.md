@@ -16,6 +16,14 @@ All notable changes to the Threat Detection Suite (TDS) project will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.6] - 2026-08-20
+
+### Changed
+
+- Published the current Windows validation boundary and build path in the README.
+- Aligned the CMake project version with the release tag.
+- Clarified that native driver runtime behavior still requires an isolated Windows and WDK validation environment.
+
 ## [5.0.0]
 
 ### Added
