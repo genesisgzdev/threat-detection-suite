@@ -186,7 +186,7 @@ void PersistenceDetector::ScanDirectory(const std::wstring& directory, int depth
                     Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_PERSISTENCE, "Hidden+System file detected in temp/system dir", fPath, 0);
                 }
 
-                if (Entropy::IsFileHighEntropy(fullPath)) {
+                if (EntropyAnalyzer::AnalyzeFile(WStringToString(fullPath))) {
                     std::string fPath = WStringToString(fullPath);
                     Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_PERSISTENCE, "High entropy persistence file detected", fPath, 0);
                 }

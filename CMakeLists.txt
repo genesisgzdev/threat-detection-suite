@@ -10,7 +10,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Security Hardening Flags (Standard EDR Practices)
 if(MSVC)
-    add_compile_options(/GS /guard:cf /W4 /WX /sdl /wd4324 /wd4100 /wd4244)
+    add_compile_options(/GS /guard:cf /W4 /WX /sdl /wd4324 /wd4100 /wd4244 /wd4267)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     add_link_options(/DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /GUARD:CF /CETCOMPAT)
 endif()
 
@@ -76,10 +77,10 @@ install(TARGETS TDSService TDSBridge
 
 # Testing Configuration
 enable_testing()
-set_target_properties(TDSService TDSBridge PROPERTIES
+set_target_properties(TDSCore TDSService TDSBridge PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 add_custom_target(TDSDriverBuild
     COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File

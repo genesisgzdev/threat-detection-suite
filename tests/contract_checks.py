@@ -28,4 +28,16 @@ if "METHOD_OUT_DIRECT" in common:
 if "TDS_RESPONSE_MODE" not in service:
     raise SystemExit("service response policy wiring missing")
 
+driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
+if "IoValidateDeviceIoControlAccess(Irp, FILE_WRITE_ACCESS)" not in driver or "IoValidateDeviceIoControlAccess(Irp, FILE_READ_ACCESS)" not in driver:
+    raise SystemExit("explicit policy/event IOCTL access validation missing")
+if "FILE_ANY_ACCESS" not in common:
+    raise SystemExit("shared IOCTL ABI unexpectedly changed")
+if "IoCreateDeviceSecure" not in driver:
+    raise SystemExit("driver device ACL is not enforced")
+if "IsAuthorizedPolicyCaller" not in driver:
+    raise SystemExit("policy caller authorization check missing")
+if "OpenDriverWithPolicy" not in service or "ApplyProtectionPolicy" not in service:
+    raise SystemExit("service reconnect policy reapplication missing")
+
 print("TDS contract checks: ok")
