@@ -14,7 +14,7 @@ EtwCollector::EtwCollector(EventHandler handler) : m_traceHandle(INVALID_PROCESS
 EtwCollector::~EtwCollector() { Stop(); }
 
 bool EtwCollector::Start() {
-    ULONG bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + m_sessionName.length() + 1;
+    ULONG bufferSize = static_cast<ULONG>(sizeof(EVENT_TRACE_PROPERTIES) + m_sessionName.length() + 1);
     EVENT_TRACE_PROPERTIES* traceProp = (EVENT_TRACE_PROPERTIES*)malloc(bufferSize);
     if (!traceProp) return false;
     ZeroMemory(traceProp, bufferSize);
@@ -48,7 +48,7 @@ void EtwCollector::Stop() {
     if (m_isRunning || m_sessionHandle != 0 || m_traceHandle != INVALID_PROCESSTRACE_HANDLE) {
         m_isRunning = false;
         if (m_traceHandle != INVALID_PROCESSTRACE_HANDLE) { CloseTrace(m_traceHandle); m_traceHandle = INVALID_PROCESSTRACE_HANDLE; }
-        ULONG bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + m_sessionName.length() + 1;
+        ULONG bufferSize = static_cast<ULONG>(sizeof(EVENT_TRACE_PROPERTIES) + m_sessionName.length() + 1);
         EVENT_TRACE_PROPERTIES* traceProp = (EVENT_TRACE_PROPERTIES*)malloc(bufferSize);
         if (traceProp) {
             ZeroMemory(traceProp, bufferSize); traceProp->Wnode.BufferSize = bufferSize; traceProp->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
