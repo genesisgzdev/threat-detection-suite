@@ -10,7 +10,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Security Hardening Flags (Standard EDR Practices)
 if(MSVC)
-    add_compile_options(/GS /guard:cf /W4 /WX /sdl /wd4324 /wd4100 /wd4244)
+    add_compile_options(/GS /guard:cf /W4 /WX /sdl /wd4324 /wd4100 /wd4244 /wd4267)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     add_link_options(/DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /GUARD:CF /CETCOMPAT)
 endif()
 
