@@ -1,84 +1,78 @@
-# Threat Detection Suite (TDS)
+# Threat Detection Suite
 
-> **Development status:** TDS is an active Windows 10/11 x64 engineering project.
-> The user-mode event contract, bounded kernel queue, service ingestion path and
-> observe-first response policy are being hardened. Do not deploy the driver on
-> production hosts until the Windows/WDK, Driver Verifier and isolated ATT&CK
-> acceptance suites pass. The default response mode is `observe`.
+Threat Detection Suite (TDS) is a Windows security engineering project that connects a kernel driver, a user-mode analysis service and a small SOC tooling layer.
 
-## Runtime configuration
+The repository is useful for studying the contracts and failure handling around Windows telemetry. It is not presented as a finished commercial EDR and should not be installed on a production host.
 
-- `TDS_RESPONSE_MODE=observe|alert|contain|terminate` controls staged response.
-- `TDS_LOG_PATH` selects the JSONL output path; the default is the current working directory.
-- `TDS_FORENSICS=1` enables critical-alert process dumps; it is disabled by default.
-- `TDS_ENABLE_YARA` is a CMake option and defaults to `OFF` unless a YARA SDK is supplied.
+[![Windows build](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/ci.yml)
+[![Security audit](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml/badge.svg)](https://github.com/genesisgzdev/threat-detection-suite/actions/workflows/security.yml)
+[![License](https://img.shields.io/github/license/genesisgzdev/threat-detection-suite)](LICENSE)
 
-## System Architecture
+## Current state
 
-The Threat Detection Suite (TDS) operates across two primary execution rings: Kernel-Mode (Ring 0) and User-Mode (Ring 3). This separation ensures that high-latency heuristic analysis does not induce system-wide DPC (Deferred Procedure Call) latency or bug checks (BSOD).
+The current main branch has reproducible repository checks, Windows user-mode CI, CodeQL source analysis and contract checks. A matching Windows 10/11 x64 machine with Visual Studio, WDK, Driver Verifier and an isolated test plan is still required before making claims about native driver runtime behavior.
 
-```mermaid
-graph TD;
-    subgraph Ring 0 [Kernel Mode]
-        WFP[WFP Sublayer Filter] --> |Network Telemetry| EL[Event Lookaside List];
-        MF[Minifilter Callback] --> |File I/O Telemetry| EL;
-        OB[ObRegisterCallbacks] --> |Process Handle Req| EL;
-        EL --> |InterlockedPushEntrySList| SList[Lock-Free SList Queue];
-        IOCTL[IOCTL_TDS_GET_NEXT_EVENT] --> |InterlockedPopEntrySList| SList;
-    end
+The response pipeline starts in `observe` mode. `contain` and `terminate` are explicit modes for controlled validation only.
 
-    subgraph Ring 3 [User Mode]
-        SList --> |Buffered IRP| Svc[TDS Analysis Service];
-        Svc --> |ETW-Ti Session| ETW[EtwCollector];
-        Svc --> |MEM_PRIVATE Scan| YARA[MemoryScanner / libyara];
-        Svc --> |Shannon Entropy| Heuristics[HeuristicsEngine];
-        Heuristics --> |Risk Score >= 70| IPS[IPSManager];
-        IPS --> |NtTerminateProcess| Threat[Malicious Process];
-        Heuristics --> |Log Event| Log[tds_threat_events.jsonl];
-    end
-    
-    subgraph Automation [Response]
-        Log --> |tail -f| Bot[SOC Bot python];
-        Bot --> |HTTP POST| GitHub[GitHub Issues API];
-    end
+## Architecture
+
+```text
+kernel driver  ->  bounded event contract  ->  TDSService
+       |                                      |
+       +-- WFP, minifilter, process callbacks  +-- ETW-TI and heuristics
+                                              |
+                                  JSONL / OTLP / optional SOC bot
 ```
 
-## Core Implementation Details
+The user-mode build produces `TDSService` and `TDSBridge`. The driver is built separately through the WDK project at `ThreatDetectionSuite/TDSDriver/TDSDriver.vcxproj`.
 
-### 1. Windows Filtering Platform (WFP)
-The network filter operates independently of the standard Windows Firewall by registering a custom WFP Sublayer (`TDS_SUBLAYER_GUID`).
-- **Weight**: Set to `0xFFFF`, ensuring the TDS callouts inspect network traffic prior to third-party consumer filters.
-- **Loopback Exclusion**: Drops traffic with the `FWP_CONDITION_FLAG_IS_LOOPBACK` flag at the BFE engine level, eliminating unnecessary Inter-Process Communication (IPC) noise.
-- **Protocol Precision**: The callout targets `FWPS_LAYER_DATAGRAM_DATA_V4` and `V6`. It intercepts UDP packets on port 53; payloads exceeding 512 bytes are actively dropped (`FWP_ACTION_BLOCK`), neutralizing DNS tunneling exfiltration.
+The main pieces are:
 
-### 2. Lock-Free Telemetry Queuing
-Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ransomware encrypting a drive) causes severe processor contention.
-- **Memory Allocation**: The driver initializes an `NPAGED_LOOKASIDE_LIST` during `DriverEntry`. High-frequency callbacks allocate event buffers from this pool, guaranteeing constant-time, fragmentation-free allocation.
-- **Queueing**: Events are pushed to an `SLIST_HEADER` using `InterlockedPushEntrySList`. The user-mode service retrieves them via `IOCTL_TDS_GET_NEXT_EVENT` using `InterlockedPopEntrySList`. This completely eliminates spinning waits.
+- WFP and minifilter telemetry with explicit lifecycle cleanup
+- A bounded kernel-to-user event queue and validated IOCTL buffers
+- Process protection callbacks and policy authorization checks
+- ETW-TI collection, entropy analysis and optional YARA support
+- JSONL logging, local rotation and optional OTLP export
+- PowerShell tooling for service installation and controlled diagnostics
 
-### 3. Kernel Exception Handling (Anti-Fuzzing)
-The `TDSDispatchDeviceControl` routine is hardened against user-mode fuzzing attacks.
-- Structured Exception Handling (`__try / __except(EXCEPTION_EXECUTE_HANDLER)`) wraps all IRP buffer accesses.
-- `ProbeForRead` and `ProbeForWrite` are strictly enforced for `METHOD_NEITHER` I/O.
-- If a malicious process sends a corrupted pointer or oversized buffer length, the kernel catches the `STATUS_ACCESS_VIOLATION` and gracefully fails the IRP, preventing a Bug Check (BSOD).
+## Build on Windows
 
-### 4. Process Tamper Protection
-Protection of critical processes (such as LSASS and the TDS user-mode service) is implemented via `ObRegisterCallbacks`.
-- **Signature Verification**: `IsLsass()` relies on `PsGetProcessSignatureLevel()`. It demands a Microsoft signing level (`>= 7`) before comparing process paths. This defeats trivial path spoofing.
-- **Access Stripping**: Handles requesting `PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `PROCESS_SUSPEND_RESUME`, or `PROCESS_CREATE_THREAD` against protected PIDs have those flags stripped from their `DesiredAccess` mask by the kernel.
+Requirements:
 
-### 5. Minifilter Reentrancy Prevention
-To prevent infinite recursion deadlocks—where the EDR intercepts its own log writes—the driver implements requestor-awareness.
-- `TDSPreWriteCallback` invokes `FltGetRequestorProcess()`. If the originating process is the TDS user-mode service, the IRP is skipped (`FLT_PREOP_SUCCESS_NO_CALLBACK`).
-- All file operations utilize the `FLTFL_OPERATION_REGISTRATION_SKIP_PAGING_IO` flag to avoid deadlocks with the Windows Memory Manager.
+- Windows 10/11 x64
+- Visual Studio 2022 with Desktop development with C++
+- A WDK matching the installed Windows SDK
+- CMake 3.20 or newer
 
-### 6. User-Mode Memory Scanning and YARA
-The `MemoryScanner` class integrates `libyara` directly into the C++ runtime.
-- It iterates through the virtual address space of running processes, specifically targeting `MEM_PRIVATE` pages with `PAGE_EXECUTE_READWRITE` or `PAGE_EXECUTE_READ` protections.
-- **Direct Syscalls & Stack Pivoting**: The scanner statically searches for `0x0F 0x05` (syscall) instructions outside of `ntdll.dll` boundaries, and uses `NtQueryInformationThread` to verify that the current stack pointer resides within the bounds defined by the Thread Environment Block (TEB).
+Build the user-mode components:
 
-### 7. Automated Incident Response (SOC Bot)
-The `tools/soc/soc_bot.py` script provides real-time automated reporting.
-- It performs a non-blocking `tail` on the `tds_threat_events.jsonl` log file.
-- When an event with `HIGH` or `CRITICAL` severity is written by the `HeuristicsEngine`, the bot constructs a Markdown report and pushes it to the GitHub Issues API using standard HTTPS requests.
-- The bot relies strictly on environment variables (`GITHUB_TOKEN`, `TDS_LOG_PATH`), containing no hardcoded local paths or credentials.
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DTDS_ENABLE_YARA=OFF
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+```
+
+Build the driver with the WDK toolchain:
+
+```powershell
+msbuild ThreatDetectionSuite/TDSDriver/TDSDriver.vcxproj /m /p:Configuration=Release /p:Platform=x64 /warnAsError
+```
+
+On Linux, `bash build.sh` runs repository and contract checks only. It does not compile the Windows driver.
+
+## Configuration
+
+- `TDS_RESPONSE_MODE=observe|alert|contain|terminate`
+- `TDS_LOG_PATH` selects the JSONL output path
+- `TDS_FORENSICS=1` enables critical-alert process dumps
+- `TDS_ENABLE_YARA` is enabled through CMake and requires a YARA SDK
+
+Review [BUILDING.md](BUILDING.md), [SECURITY.md](SECURITY.md) and [DISCLAIMER.md](DISCLAIMER.md) before loading a driver or enabling response actions.
+
+## Validation boundary
+
+The CI build proves that the checked-in contracts and Windows compilation path are coherent. It does not prove that the driver is safe on every Windows installation, that WDK signing is available, or that enforcement works correctly under real hostile input. Those checks belong on isolated hardware or a disposable VM.
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).
