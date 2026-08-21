@@ -1,39 +1,88 @@
 # Threat Detection Suite architecture
 
-The repository contains a Windows kernel/user boundary plus separate SOC utilities. The Linux script does not build the Windows binaries.
+TDS tiene dos fronteras distintas: el driver WDK en kernel y los ejecutables CMake de user mode. Las herramientas SOC y OTLP están fuera del camino de decisión del servicio.
+
+## 1. Componentes y contratos
 
 ~~~mermaid
 flowchart LR
-    subgraph K[Windows kernel]
-      P[process image thread callbacks]
-      R[registry callback]
-      N[WFP callouts]
-      F[minifilter]
-      Q[bounded event queue]
-      P --> Q
-      R --> Q
-      N --> Q
-      F --> Q
-      D[TDSDriver device and IOCTL ABI]
-      Q --> D
+    subgraph KERNEL[Windows kernel - TDSDriver.vcxproj]
+      PROC[process/image/thread callbacks]
+      REG[registry callback]
+      NET[WFP callouts]
+      MINI[minifilter callbacks]
+      Q[bounded SLIST event queue]
+      ABI[TDSCommon.h event and policy ABI]
+      DEV[device TDS_Core_Link]
+      PROC --> Q
+      REG --> Q
+      NET --> Q
+      MINI --> Q
+      Q --> ABI --> DEV
     end
-    S[TDSService] -->|CreateFile and GET_NEXT_EVENT| D
-    S -->|SET_PROTECTION_POLICY| D
-    E[TDSEngine heuristics and correlation] --> L[JSONL Logger]
-    S --> E
-    T[ETW-TI collector] --> E
-    L --> O[OTLP exporter and SOC tools]
-    B[TDSBridge] --> E
+    subgraph USER[CMake user mode]
+      S[TDSService Windows service]
+      E[TDSEngine]
+      H[HeuristicsEngine + detectors]
+      C[SequenceCorrelator]
+      L[Logger JSONL rotation]
+      S --> E --> H
+      E --> C
+      E --> L
+    end
+    DEV -->|GET_NEXT_EVENT buffered IOCTL| S
+    S -->|SET_PROTECTION_POLICY| DEV
+    ETW[EtwCollector / ETW-TI] --> E
+    B[TDSBridge utility] --> E
+    L --> SOC[tools/soc TDSWatcher OTLP exporter]
 ~~~
 
-## What is actually built
+Precisión de build:
 
-- CMake builds TDSService, TDSBridge and the TDSCore object sources on Windows.
-- TDSDriver.vcxproj is the WDK driver build and is not compiled by the CMake user-mode target.
-- TDSService opens the TDS_Core_Link device, applies a protection policy, drains GET_NEXT_EVENT, decodes bounded event payloads and pushes valid events into TDSEngine.
-- The default service policy is observe-only. TDS_RESPONSE_MODE=contain or terminate changes the policy sent to the driver; response behavior still requires isolated Windows validation.
-- tools/soc, TDSWatcher.ps1 and the OTLP exporter are separate consumers of emitted telemetry. They are not a cloud connector hidden inside the service.
+- CMake compila `TDSCore`, `TDSService` y `TDSBridge` en Windows.
+- `ThreatDetectionSuite/TDSDriver/TDSDriver.vcxproj` se compila con WDK por separado.
+- `build.sh` en Linux solo ejecuta checks de contratos y repositorio; no genera el driver ni un binario Windows.
+- YARA es opcional en CMake y se activa con un SDK localizado por `TDS_YARA_ROOT`.
 
-## Gates
+## 2. Arranque y ciclo de eventos
 
-build.sh runs repository and contract checks on Linux. Windows CI is the compilation boundary. Driver signing, installation, callback behavior, WFP enforcement and hostile-input handling require WDK-backed Windows tests.
+~~~mermaid
+sequenceDiagram
+    participant SCM as Windows SCM
+    participant S as TDSService
+    participant D as TDSDriver
+    participant E as TDSEngine
+    participant L as JSONL Logger
+    SCM->>S: ServiceMain
+    S->>E: Start
+    S->>S: read TDS_RESPONSE_MODE
+    S->>D: CreateFile TDS_Core_Link
+    S->>D: SET_PROTECTION_POLICY
+    loop until service stop
+      S->>D: GET_NEXT_EVENT
+      D-->>S: bounded header + payload
+      S->>S: validate size and decode offsets
+      S->>E: PushEvent valid event
+      E->>L: detection/telemetry record
+    end
+    S->>D: CloseHandle
+    S->>E: Shutdown
+~~~
+
+`observe` queda como política inicial. `contain` y `terminate` solo cambian los flags enviados al driver; no son evidencia de que la contención o terminación haya sido validada en una instalación Windows real.
+
+## 3. Seguridad de la frontera kernel/user
+
+- Policy IOCTL exige `FILE_WRITE_ACCESS`, tamaño exacto, versión 1, flags conocidos y campos reservados en cero.
+- Event IOCTL exige `FILE_READ_ACCESS`, buffer de salida suficiente y el límite `MAX_EVENT_BUFFER_SIZE`.
+- El driver comprueba que el solicitante de la policy sea el proceso TDS autorizado; el servicio vuelve a abrir el device si se desconecta.
+- La cola es acotada para que el flujo de eventos no convierta una ráfaga en crecimiento sin límite de memoria.
+
+## 4. Qué prueba cada gate
+
+| Gate | Prueba | No prueba |
+| --- | --- | --- |
+| `build.sh` | contratos ABI y estructura del repo en Linux | compilación o runtime Windows |
+| user-mode CI | compilación MSVC de CMake | instalación/carga del driver |
+| driver contract | access bits, IOCTL y lifecycle estáticos | callback real, WFP real, firma |
+| laboratorio WDK | driver instalado y observado | seguridad universal en todos los Windows |
