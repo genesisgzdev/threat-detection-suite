@@ -2,6 +2,10 @@
 
 TDS tiene dos fronteras distintas: el driver WDK en kernel y los ejecutables CMake de user mode. Las herramientas SOC y OTLP están fuera del camino de decisión del servicio.
 
+## Cómo leerlo
+
+La primera figura muestra el camino de un evento. La secuencia muestra el arranque y el apagado. La última tabla indica qué se puede comprobar en Linux, qué requiere Windows y qué necesita una máquina aislada. Las líneas opcionales son integraciones separadas.
+
 ## 1. Componentes y contratos
 
 ~~~mermaid
