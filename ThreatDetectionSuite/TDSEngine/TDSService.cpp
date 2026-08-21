@@ -13,10 +13,7 @@
 #include "TDSEngine.h"
 #include "collectors/EtwCollector.h"
 
-//
-// Threat Detection Suite v5.0.0 - Native Windows Service
-// Cloud Integration & Advanced Kernel Watchdog
-//
+// Threat Detection Suite v5.6.6 - Native Windows Service
 
 SERVICE_STATUS        g_ServiceStatus = {0};
 SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
@@ -161,19 +158,6 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode) {
             break;
     }
 }
-
-class CloudTelemetryBridge {
-public:
-    /**
-     * Dispatches telemetry to Google SecOps (UDM Format).
-     */
-    static void Dispatch(const TDS::Event& event) {
-        UNREFERENCED_PARAMETER(event);
-        // Here we would use the mcp_google-secops_ingest_udm_events tool
-        // or a direct REST API call.
-        // Format: UDM standard mapping for 2026.
-    }
-};
 
 static bool ApplyProtectionPolicy(HANDLE hDevice, const TDS_PROTECTION_POLICY& policy) {
     DWORD bytesReturned = 0;

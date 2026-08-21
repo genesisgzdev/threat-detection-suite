@@ -32,7 +32,7 @@ The main pieces are:
 - A bounded kernel-to-user event queue and validated IOCTL buffers
 - Process protection callbacks and policy authorization checks
 - ETW-TI collection, entropy analysis and optional YARA support
-- JSONL logging, local rotation and optional OTLP export
+- JSONL logging, local rotation and separate SOC/OTLP consumer tools
 - PowerShell tooling for service installation and controlled diagnostics
 
 ## Build on Windows
@@ -68,6 +68,8 @@ On Linux, `bash build.sh` runs repository and contract checks only. It does not 
 - `TDS_ENABLE_YARA` is enabled through CMake and requires a YARA SDK
 
 Review [BUILDING.md](BUILDING.md), [SECURITY.md](SECURITY.md) and [DISCLAIMER.md](DISCLAIMER.md) before loading a driver or enabling response actions.
+
+The event and build boundaries are mapped in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Validation boundary
 
