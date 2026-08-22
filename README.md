@@ -59,6 +59,8 @@ Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ranso
 ### 3. IOCTL boundary and queue pressure
 Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites antes de copiar datos. `IOCTL_TDS_GET_QUEUE_STATS` expone profundidad y eventos descartados; cuando la cola llega a `EVENT_QUEUE_LIMIT`, el driver descarta el evento y aumenta el contador en vez de crecer sin límite. La fuzzing de IRP, Driver Verifier y las pruebas de unload siguen siendo validación nativa pendiente.
 
+El `EventBus` de user-mode mantiene una segunda cola acotada para el análisis. Sus métricas separan profundidad actual, máximo observado, descartados totales y descartados por tipo de evento. Un descarte en cualquiera de las dos colas significa telemetría incompleta; no se interpreta como ausencia de actividad.
+
 ### 4. Process Tamper Protection
 Protection of critical processes (such as LSASS and the TDS user-mode service) is implemented via `ObRegisterCallbacks`.
 - **Identity**: the service PID is captured from the process that successfully sets the policy through the device IOCTL. LSASS still uses `PsGetProcessSignatureLevel()` and a system path check. The service path is not used as an authorization primitive.

@@ -63,6 +63,7 @@ public:
     void Shutdown();
 
     void PushEvent(const Event& event);
+    EventBus::Stats QueueStats() const;
 
     bool IsLolbasBinary(const std::wstring& path);
     void UpdateNetworkStats(DWORD pid, double latency);

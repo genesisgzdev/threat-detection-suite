@@ -54,6 +54,10 @@ void TDSEngine::PushEvent(const Event& event) {
     m_eventBus->Push(event);
 }
 
+EventBus::Stats TDSEngine::QueueStats() const {
+    return m_eventBus ? m_eventBus->Snapshot() : EventBus::Stats{};
+}
+
 void TDSEngine::AnalysisLoop() {
     while (m_running) {
         auto eventOpt = m_eventBus->WaitAndPop(500);
