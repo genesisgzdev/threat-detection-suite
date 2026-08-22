@@ -7,6 +7,7 @@
 - Pinnea `msvc-dev-cmd` a v1.13.0; esa acción upstream todavía declara Node 20 y el runner lo ejecuta bajo compatibilidad de Node 24.
 - Corrige el callback WFP para limitar la decodificación a ALE IPv4 antes de usar sus índices y punteros de campos.
 - Corrige el fuzzer de IOCTL para no declarar tamaños mayores que sus buffers reales y evitar falsos crashes del propio harness.
+- El bridge user-mode valida que las rutas UTF-16 terminen dentro del payload antes de mostrarlas.
 
 ## [5.6.7] - 2026-08-22
 

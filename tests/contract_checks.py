@@ -34,6 +34,8 @@ if "TDS_RESPONSE_MODE" not in service:
     raise SystemExit("service response policy wiring missing")
 if "TDS_POLICY_FLAG_ENABLE_WFP" not in service or "TDS_POLICY_FLAG_ENABLE_MINIFILTER" not in service:
     raise SystemExit("service must explicitly enable the registered telemetry callbacks")
+if "ReadBoundedWideString" not in bridge or "wprintf(L\"Path: %s \", (WCHAR*)((BYTE*)ev + ev->ImagePathOffset))" in bridge:
+    raise SystemExit("bridge must validate NUL termination inside the event payload")
 if "if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_WFP) == 0) return;" not in driver:
     raise SystemExit("WFP callback ignores its runtime enable flag")
 if "if (classifyOut) classifyOut->actionType = FWP_ACTION_PERMIT;" not in driver:
