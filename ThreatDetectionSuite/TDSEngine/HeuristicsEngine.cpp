@@ -13,10 +13,14 @@ void HeuristicsEngine::ProcessEvent(const Event& event) {
         m_processContexts.erase(event.Pid);
     }
     uint32_t attributedPid = event.Pid;
+    bool responseTargetKnown = true;
     if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection ||
         event.Type == TDSEventEtwTiApcInjection) {
         if (const auto* injection = std::get_if<RemoteThreadEvent>(&event.Data)) {
             attributedPid = injection->TargetPid;
+        } else if (const auto* etw = std::get_if<EtwApcEvent>(&event.Data)) {
+            attributedPid = etw->TargetKnown ? etw->TargetPid : etw->SourcePid;
+            responseTargetKnown = etw->TargetKnown;
         }
     }
     auto& ctx = m_processContexts[attributedPid];
@@ -55,10 +59,10 @@ void HeuristicsEngine::ProcessEvent(const Event& event) {
             return;
     }
 
-    EvaluateRisk(attributedPid);
+    EvaluateRisk(attributedPid, responseTargetKnown);
 }
 
-void HeuristicsEngine::EvaluateRisk(uint32_t pid) {
+void HeuristicsEngine::EvaluateRisk(uint32_t pid, bool responseTargetKnown) {
     auto it = m_processContexts.find(pid);
     if (it != m_processContexts.end() && it->second.Score >= THREAT_THRESHOLD) {
         std::string reason = "Behavioral anomaly detected: Threat Score " + std::to_string(it->second.Score);
@@ -71,14 +75,18 @@ void HeuristicsEngine::EvaluateRisk(uint32_t pid) {
             pid
         );
 
-        TriggerRemediation(pid, it->second.Score, reason);
+        TriggerRemediation(pid, it->second.Score, reason, responseTargetKnown);
         
         // Reset score after alert to prevent spamming, or erase context
         it->second.Score = 0; 
     }
 }
 
-void HeuristicsEngine::TriggerRemediation(uint32_t pid, int score, const std::string& reason) {
+void HeuristicsEngine::TriggerRemediation(uint32_t pid, int score, const std::string& reason, bool responseTargetKnown) {
+    if (!responseTargetKnown) {
+        std::cout << "[IPS] Response suppressed: ETW target process is not decoded: " << reason << std::endl;
+        return;
+    }
     if (m_responsePolicy.AllowsTermination(score)) {
         std::cout << "[IPS] Terminating PID " << pid << " due to: " << reason << std::endl;
         IPSManager::ContainProcess(pid);

@@ -39,8 +39,8 @@ private:
     ResponsePolicy m_responsePolicy = ResponsePolicy::FromEnvironment();
     const int THREAT_THRESHOLD = 70;
 
-    void EvaluateRisk(uint32_t pid);
-    void TriggerRemediation(uint32_t pid, int score, const std::string& reason);
+    void EvaluateRisk(uint32_t pid, bool responseTargetKnown = true);
+    void TriggerRemediation(uint32_t pid, int score, const std::string& reason, bool responseTargetKnown);
 };
 
 } // namespace TDS

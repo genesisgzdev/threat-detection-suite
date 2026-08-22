@@ -25,6 +25,12 @@ struct RemoteThreadEvent {
     uint32_t TargetPid;
 };
 
+struct EtwApcEvent {
+    uint32_t SourcePid;
+    uint32_t TargetPid;
+    bool TargetKnown;
+};
+
 struct NetworkEvent {
     uint32_t AddressFamily;
     uint8_t Protocol;
@@ -58,6 +64,7 @@ using EventData = std::variant<
     ProcessEvent,
     ImageLoadEvent,
     RemoteThreadEvent,
+    EtwApcEvent,
     NetworkEvent,
     HandleOpEvent,
     FileEvent,

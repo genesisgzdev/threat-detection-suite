@@ -47,6 +47,10 @@ if "const uint32_t targetPid = data->TargetPid" not in engine:
     raise SystemExit("injection response must target the decoded target PID")
 if "TDSEventEtwTiApcInjection" not in correlator or "EarlyInitializationPattern" not in correlator:
     raise SystemExit("ETW/APC correlation path missing")
+etw = (ROOT / "ThreatDetectionSuite/TDSEngine/collectors/EtwCollector.cpp").read_text(encoding="utf-8-sig")
+events = (ROOT / "ThreatDetectionSuite/TDSCommon/TDSEvents.h").read_text(encoding="utf-8-sig")
+if "EtwApcEvent{event.Pid, 0, false}" not in etw or "TargetKnown" not in events or "RemoteThreadEvent{event.Pid}" in etw:
+    raise SystemExit("ETW collector must not treat the emitter PID as the target")
 if "if (event.Type == TDSEventProcessCreate)" not in heuristics or "m_processContexts.erase(event.Pid)" not in heuristics:
     raise SystemExit("heuristic context must reset on a new PID generation")
 if "SaveToDisk() {}" in correlator or "LoadFromDisk() {}" in correlator:

@@ -100,6 +100,15 @@ void TDSEngine::EvaluateThreat(const Event& event) {
         case TDSEventRemoteThread:
         case TDSEventApcInjection:
         case TDSEventEtwTiApcInjection: {
+            if (auto data = std::get_if<EtwApcEvent>(&event.Data)) {
+                Logger::Instance().LogThreat(
+                    TDS_SEVERITY_HIGH,
+                    CAT_DLL_INJECTION,
+                    "ETW-TI APC telemetry observed without a decoded target",
+                    "Source PID: " + std::to_string(data->SourcePid),
+                    data->SourcePid);
+                break;
+            }
             if (auto data = std::get_if<RemoteThreadEvent>(&event.Data)) {
                 const uint32_t targetPid = data->TargetPid;
                 Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Injection telemetry observed", "Target PID: " + std::to_string(targetPid), targetPid);
