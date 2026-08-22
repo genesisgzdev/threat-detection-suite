@@ -21,6 +21,9 @@ $service = Get-Content (Join-Path $root 'ThreatDetectionSuite\TDSEngine\TDSServi
     if ($driver -notmatch [regex]::Escape($_)) { throw "Missing driver security contract: $_" }
 }
 
+if ($driver -match 'A;;GA;;;BA') { throw 'Device ACL grants administrators generic write access' }
+if ($driver -notmatch 'A;;GR;;;BA') { throw 'Device ACL no longer grants administrators read-only inspection' }
+
 if ($common -notmatch 'IOCTL_TDS_SET_PROTECTION_POLICY[^\r\n]*FILE_WRITE_ACCESS' -or
     $common -notmatch 'IOCTL_TDS_SET_RUNTIME_POLICY[^\r\n]*FILE_WRITE_ACCESS') {
     throw 'Policy IOCTL ABI is not write-protected'

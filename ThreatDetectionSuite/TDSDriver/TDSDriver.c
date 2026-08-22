@@ -374,7 +374,9 @@ NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
     UNREFERENCED_PARAMETER(RegistryPath); UNICODE_STRING deviceName, symLink, deviceSddl;
     RtlInitUnicodeString(&deviceName, L"\\Device\\TDS_Core_Kernel"); RtlInitUnicodeString(&symLink, L"\\DosDevices\\TDS_Core_Link");
-    RtlInitUnicodeString(&deviceSddl, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)");
+    // LocalSystem owns policy writes. Administrators retain read-only
+    // telemetry access; elevated admin is not the policy authority.
+    RtlInitUnicodeString(&deviceSddl, L"D:P(A;;GA;;;SY)(A;;GR;;;BA)");
     KeInitializeSpinLock(&g_PolicyLock);
     NTSTATUS status = IoCreateDeviceSecure(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &deviceSddl, &TDS_DEVICE_CLASS_GUID, &g_DeviceObject);
     if (!NT_SUCCESS(status)) return status;
