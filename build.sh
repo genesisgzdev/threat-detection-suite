@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Threat Detection Suite v5.6.5 - repository and Windows build entrypoint
+# Threat Detection Suite v5.6.7 - repository and Windows build entrypoint
 # Note: Full driver build requires a Windows environment with WDK.
 # This script handles CMake-based user-mode components and linters.
 
