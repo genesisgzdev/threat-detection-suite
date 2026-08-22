@@ -153,9 +153,16 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
         PEVENT_ITEM item = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
         PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
         ULONG required = sizeof(TDS_EVENT_HEADER) + header->DataSize;
-        if (header->DataSize > MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER) || required > outLength) {
+        if (header->DataSize > MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER)) {
             InterlockedDecrement(&g_EventCount);
             ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
+            return CompleteIrp(Irp, STATUS_INVALID_BUFFER_SIZE, 0);
+        }
+        if (required > outLength) {
+            // A valid event must survive a probe with an undersized user
+            // buffer. Requeue it instead of turning a sizing mistake into
+            // silent telemetry loss.
+            InterlockedPushEntrySList(&g_EventQueueHead, &item->ListEntry);
             return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, required);
         }
         RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, header, required);

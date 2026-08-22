@@ -88,5 +88,7 @@ if "OpenDriverWithPolicy" not in service or "ApplyProtectionPolicy" not in servi
 for marker in ("TDS_QUEUE_STATS", "HighWatermark", "DroppedEvents"):
     if marker not in common + service:
         raise SystemExit(f"queue observability contract missing: {marker}")
+if "Requeue it instead of turning a sizing mistake into" not in driver or "InterlockedPushEntrySList(&g_EventQueueHead, &item->ListEntry);" not in driver:
+    raise SystemExit("undersized event reads must preserve the queued event")
 
 print("TDS contract checks: ok")

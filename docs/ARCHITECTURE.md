@@ -82,6 +82,7 @@ Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor d
 - Policy IOCTL exige `FILE_WRITE_ACCESS`, tamaño exacto, versión 1, flags conocidos y campos reservados en cero.
 - `TDS_POLICY_FLAG_PROTECT_SERVICE` habilita el filtrado de handles del proceso del servicio; el callback consulta la política vigente antes de aplicar esa protección.
 - Event IOCTL exige `FILE_READ_ACCESS`, buffer de salida suficiente y el límite `MAX_EVENT_BUFFER_SIZE`.
+- Si el buffer de salida no alcanza para un evento válido, el driver lo vuelve a insertar y devuelve el tamaño requerido; esa consulta no se cuenta como pérdida.
 - El device limita el acceso mediante ACL y los bits del IOCTL. Tras una policy válida, el driver conserva una referencia al objeto `PEPROCESS` que estableció la sesión protegida, no un nombre ni un PID; limpia esa referencia cuando el proceso termina. El servicio vuelve a abrir el device si se desconecta.
 - La cola kernel->user es acotada para que el flujo de eventos no convierta una ráfaga en crecimiento sin límite de memoria. La cola de análisis user-mode también expone profundidad, high-water mark y descartes por tipo para hacer visible la presión de transporte.
 
