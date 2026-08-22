@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ThreatDetectionSuite VERSION 5.6.6 LANGUAGES C CXX)
+project(ThreatDetectionSuite VERSION 5.6.7 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "ThreatDetectionSuite user-mode build requires Windows; use build.sh for repository-only checks")
