@@ -222,6 +222,7 @@ void QueueTDSEvent(PEVENT_ITEM item) {
 
 void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_INCOMING_METADATA_VALUES0* inMetaValues, void* layerData, const void* classifyContext, const FWPS_FILTER0* filter, UINT64 flowContext, FWPS_CLASSIFY_OUT0* classifyOut) {
     UNREFERENCED_PARAMETER(layerData); UNREFERENCED_PARAMETER(classifyContext); UNREFERENCED_PARAMETER(filter); UNREFERENCED_PARAMETER(flowContext);
+    if (!inFixedValues || !inMetaValues || !classifyOut || !inFixedValues->incomingValue) return;
     TDS_PROTECTION_POLICY policy;
     KIRQL oldIrql;
     KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
@@ -231,7 +232,17 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
     if (inMetaValues->currentMetadataValues & FWPS_METADATA_FIELD_PROCESS_ID) {
         ULONG pid = (ULONG)inMetaValues->processId;
         if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) {
-            UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT].value.uint16;
+            const ULONG remoteAddressIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS;
+            const ULONG remotePortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT;
+            const ULONG protocolIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL;
+            if (inFixedValues->valueCount <= remoteAddressIndex ||
+                inFixedValues->valueCount <= remotePortIndex ||
+                inFixedValues->valueCount <= protocolIndex) return;
+            const FWP_VALUE0* remoteAddress = &inFixedValues->incomingValue[remoteAddressIndex].value;
+            const FWP_VALUE0* remotePort = &inFixedValues->incomingValue[remotePortIndex].value;
+            const FWP_VALUE0* protocol = &inFixedValues->incomingValue[protocolIndex].value;
+            if (remoteAddress->type != FWP_UINT32 || remotePort->type != FWP_UINT16 || protocol->type != FWP_UINT8) return;
+            const UINT16 port = remotePort->uint16;
             if (!policy.ObserveOnly && policy.AllowNetworkContainment &&
                 port == 53 && inMetaValues->packetSize > 512) {
                 classifyOut->actionType = FWP_ACTION_BLOCK;
@@ -243,6 +254,11 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
             RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + sizeof(TDS_NETWORK_EVENT_DATA));
             PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
             header->Type = TDSEventNetworkConnect; header->ProcessId = pid; header->DataSize = sizeof(TDS_NETWORK_EVENT_DATA);
+            PTDS_NETWORK_EVENT_DATA network = (PTDS_NETWORK_EVENT_DATA)(header + 1);
+            network->AddressFamily = AF_INET;
+            network->Ipv4Address = remoteAddress->uint32;
+            network->RemotePort = remotePort->uint16;
+            network->Protocol = protocol->uint8;
             KeQuerySystemTimePrecise((PLARGE_INTEGER)&header->Timestamp);
             QueueTDSEvent(item);
         }

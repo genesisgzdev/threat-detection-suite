@@ -10,6 +10,7 @@ common = (ROOT / "ThreatDetectionSuite/TDSCommon/TDSCommon.h").read_text(encodin
 bridge = (ROOT / "tools/bridge/TDSBridge.cpp").read_text(encoding="utf-8-sig")
 service = (ROOT / "ThreatDetectionSuite/TDSEngine/TDSService.cpp").read_text(encoding="utf-8-sig")
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
+driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
 engine = (ROOT / "ThreatDetectionSuite/TDSEngine/TDSEngine.cpp").read_text(encoding="utf-8-sig")
 correlator = (ROOT / "ThreatDetectionSuite/TDSEngine/correlator/SequenceCorrelator.cpp").read_text(encoding="utf-8-sig")
 
@@ -30,6 +31,11 @@ if "METHOD_OUT_DIRECT" in common:
     raise SystemExit("event IOCTL must use METHOD_BUFFERED while the driver copies SystemBuffer")
 if "TDS_RESPONSE_MODE" not in service:
     raise SystemExit("service response policy wiring missing")
+for marker in ("network->Ipv4Address = remoteAddress->uint32", "network->RemotePort = remotePort->uint16", "network->Protocol = protocol->uint8"):
+    if marker not in driver:
+        raise SystemExit(f"WFP network event field is not wired: {marker}")
+if "inFixedValues->valueCount <= remoteAddressIndex" not in driver:
+    raise SystemExit("WFP network event indexes are not bounds-checked")
 if "FILE_WRITE_ACCESS" not in common or "FILE_READ_ACCESS" not in common:
     raise SystemExit("IOCTL access contract is not separated")
 if "CmRegisterCallbackEx" not in driver or "g_RegistryCallbackRegistered" not in driver:
