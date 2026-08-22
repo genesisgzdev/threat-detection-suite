@@ -21,7 +21,7 @@
 - La compilación nativa y los checks de contrato siguen siendo gates separados de la validación del driver cargado.
 
 ## [Unreleased]
-- Attributed remote-thread, APC and ETW-TI responses to the decoded target PID instead of the telemetry emitter.
+- Keeps ETW-TI emitter and target identity separate; when the provider does not expose a target, response actions are suppressed instead of reusing the emitter PID.
 - Correlated ETW/APC signals during process initialization; the repository does not label this Early Bird proof until native ground-truth validation exists.
 - Registered the declared Registry callback, separated read/write IOCTL access bits and removed the duplicate WFP classify guard.
 - Registered process, image and thread notifications and exposed queue depth and dropped-event counters.
