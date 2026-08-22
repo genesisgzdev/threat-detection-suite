@@ -22,6 +22,7 @@
 
 ## [Unreleased]
 
+- El callback de protección conecta la verificación de LSASS además de la identidad `PEPROCESS` del servicio.
 - Las flags `ENABLE_WFP` y `ENABLE_MINIFILTER` gobiernan sus callbacks; el servicio las solicita explícitamente y los checks de contrato lo verifican.
 - Ordena la cola user-mode por timestamp compartido para compensar el transporte LIFO del driver antes de ejecutar heurísticas y correlación.
 - Preserva un evento válido cuando `IOCTL_TDS_GET_NEXT_EVENT` recibe un buffer demasiado pequeño; la pérdida queda limitada a presión de cola o registros inválidos.

@@ -317,7 +317,9 @@ OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERA
     policy = g_Policy;
     KeReleaseSpinLock(&g_PolicyLock, oldIrql);
     if ((policy.Flags & TDS_POLICY_FLAG_PROTECT_SERVICE) == 0) return OB_PREOP_SUCCESS;
-    if (IsServiceProcess(targetProcess)) {
+    // Protect the authorized service and a separately verified LSASS image;
+    // neither identity is inferred from a caller-controlled process name.
+    if (IsServiceProcess(targetProcess) || IsLsass(targetProcess)) {
         ACCESS_MASK forbidden = (OperationInformation->ObjectType == *PsProcessType) ? (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | PROCESS_CREATE_THREAD) : (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT);
         if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
         else OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;

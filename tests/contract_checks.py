@@ -59,6 +59,8 @@ if "EtwApcEvent{event.Pid, 0, false}" not in etw or "TargetKnown" not in events 
     raise SystemExit("ETW collector must not treat the emitter PID as the target")
 if "if (event.Type == TDSEventProcessCreate)" not in heuristics or "m_processContexts.erase(event.Pid)" not in heuristics:
     raise SystemExit("heuristic context must reset on a new PID generation")
+if "IsServiceProcess(targetProcess) || IsLsass(targetProcess)" not in driver:
+    raise SystemExit("LSASS protection helper is not wired into the object callback")
 if "SaveToDisk() {}" in correlator or "LoadFromDisk() {}" in correlator:
     raise SystemExit("sequence correlator must not expose empty persistence hooks")
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
