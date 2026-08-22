@@ -19,7 +19,6 @@ DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) SLIST_HEADER g_EventQueueHead;
 PVOID g_ObRegistrationHandle = NULL;
 LARGE_INTEGER g_RegistryCookie = {0};
 PEPROCESS g_ServiceProcess = NULL;
-BOOLEAN g_MonitoringActive = FALSE;
 TDS_PROTECTION_POLICY g_Policy = { 1, sizeof(TDS_PROTECTION_POLICY), TDS_POLICY_FLAG_PROTECT_SERVICE, 1, 0, 0, {0, 0, 0} };
 KSPIN_LOCK g_PolicyLock;
 volatile LONG g_EventCount = 0;
@@ -140,7 +139,6 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
         KIRQL oldIrql;
         KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
         g_Policy = *requested;
-        g_MonitoringActive = requested->ObserveOnly ? FALSE : TRUE;
         KeReleaseSpinLock(&g_PolicyLock, oldIrql);
         return CompleteIrp(Irp, STATUS_SUCCESS, 0);
     }
@@ -305,6 +303,12 @@ OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERA
     if (OperationInformation->ObjectType == *PsProcessType) targetProcess = (PEPROCESS)OperationInformation->Object;
     else if (OperationInformation->ObjectType == *PsThreadType) targetProcess = IoThreadToProcess((PETHREAD)OperationInformation->Object);
     if (!targetProcess) return OB_PREOP_SUCCESS;
+    TDS_PROTECTION_POLICY policy;
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
+    policy = g_Policy;
+    KeReleaseSpinLock(&g_PolicyLock, oldIrql);
+    if ((policy.Flags & TDS_POLICY_FLAG_PROTECT_SERVICE) == 0) return OB_PREOP_SUCCESS;
     if (IsServiceProcess(targetProcess)) {
         ACCESS_MASK forbidden = (OperationInformation->ObjectType == *PsProcessType) ? (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | PROCESS_CREATE_THREAD) : (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT);
         if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;

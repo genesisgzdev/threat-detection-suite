@@ -64,6 +64,9 @@ if "set_target_properties(TDSCore PROPERTIES" not in cmake:
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
 if "IOCTL_TDS_SET_RUNTIME_POLICY" not in common or "IOCTL_TDS_SET_RUNTIME_POLICY" not in driver:
     raise SystemExit("runtime policy IOCTL contract missing")
+callback = driver[driver.find("OB_PREOP_CALLBACK_STATUS TDSPreCallback"):]
+if "TDS_POLICY_FLAG_PROTECT_SERVICE" not in callback:
+    raise SystemExit("service protection flag is not wired into the object callback")
 if "IoValidateDeviceIoControlAccess(Irp, FILE_WRITE_ACCESS)" not in driver or "IoValidateDeviceIoControlAccess(Irp, FILE_READ_ACCESS)" not in driver:
     raise SystemExit("explicit policy/event IOCTL access validation missing")
 if "FILE_ANY_ACCESS" in common:
