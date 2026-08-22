@@ -21,6 +21,8 @@
 - La compilación nativa y los checks de contrato siguen siendo gates separados de la validación del driver cargado.
 
 ## [Unreleased]
+
+- Las flags `ENABLE_WFP` y `ENABLE_MINIFILTER` gobiernan sus callbacks; el servicio las solicita explícitamente y los checks de contrato lo verifican.
 - Ordena la cola user-mode por timestamp compartido para compensar el transporte LIFO del driver antes de ejecutar heurísticas y correlación.
 - Preserva un evento válido cuando `IOCTL_TDS_GET_NEXT_EVENT` recibe un buffer demasiado pequeño; la pérdida queda limitada a presión de cola o registros inválidos.
 - Keeps ETW-TI emitter and target identity separate; when the provider does not expose a target, response actions are suppressed instead of reusing the emitter PID.
