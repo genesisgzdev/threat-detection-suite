@@ -13,7 +13,7 @@
 #include "TDSEngine.h"
 #include "collectors/EtwCollector.h"
 
-// Threat Detection Suite v5.6.6 - Native Windows Service
+// Threat Detection Suite v5.6.7 - Native Windows Service
 
 SERVICE_STATUS        g_ServiceStatus = {0};
 SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
