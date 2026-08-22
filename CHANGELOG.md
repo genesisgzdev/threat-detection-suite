@@ -81,3 +81,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced hardcoded dependency on versions across CMake, Dockerfile, and build scripts.
 - Upgraded the CI/CD pipeline to use official `snyk/actions/cpp@master` and `google/osv-scanner-action@v1` for SAST and SCA scanning with SARIF reporting.
 - Restructured `TDSCommon.h` to align atomics outside of packed structs, preventing undefined behavior (UB).
+- El device del driver concede escritura de política a LocalSystem y deja a los administradores con acceso de lectura; el contrato de Windows comprueba que una cuenta elevada ajena no pueda enviar IOCTLs de escritura.
