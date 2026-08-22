@@ -88,6 +88,9 @@ if "OpenDriverWithPolicy" not in service or "ApplyProtectionPolicy" not in servi
 for marker in ("TDS_QUEUE_STATS", "HighWatermark", "DroppedEvents"):
     if marker not in common + service:
         raise SystemExit(f"queue observability contract missing: {marker}")
+event_bus = (ROOT / "ThreatDetectionSuite/TDSEngine/EventBus.h").read_text(encoding="utf-8-sig")
+if "std::priority_queue<Event, std::vector<Event>, EventTimestampOrder>" not in event_bus or "left.Timestamp > right.Timestamp" not in event_bus:
+    raise SystemExit("analysis queue must order events by shared timestamp")
 if "Requeue it instead of turning a sizing mistake into" not in driver or "InterlockedPushEntrySList(&g_EventQueueHead, &item->ListEntry);" not in driver:
     raise SystemExit("undersized event reads must preserve the queued event")
 

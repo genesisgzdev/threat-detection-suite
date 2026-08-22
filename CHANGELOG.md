@@ -21,6 +21,7 @@
 - La compilación nativa y los checks de contrato siguen siendo gates separados de la validación del driver cargado.
 
 ## [Unreleased]
+- Ordena la cola user-mode por timestamp compartido para compensar el transporte LIFO del driver antes de ejecutar heurísticas y correlación.
 - Preserva un evento válido cuando `IOCTL_TDS_GET_NEXT_EVENT` recibe un buffer demasiado pequeño; la pérdida queda limitada a presión de cola o registros inválidos.
 - Keeps ETW-TI emitter and target identity separate; when the provider does not expose a target, response actions are suppressed instead of reusing the emitter PID.
 - Correlated ETW/APC signals during process initialization; the repository does not label this Early Bird proof until native ground-truth validation exists.

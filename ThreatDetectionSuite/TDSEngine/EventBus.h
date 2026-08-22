@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <queue>
+#include <vector>
 #include <mutex>
 #include <condition_variable>
 #include <optional>
@@ -8,6 +9,12 @@
 #include "../TDSCommon/TDSEvents.h"
 
 namespace TDS {
+
+struct EventTimestampOrder {
+    bool operator()(const Event& left, const Event& right) const {
+        return left.Timestamp > right.Timestamp;
+    }
+};
 
 class EventBus {
 public:
@@ -35,7 +42,7 @@ public:
         std::unique_lock<std::mutex> lock(m_mutex);
         if (m_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !m_queue.empty() || m_stop; })) {
             if (!m_queue.empty()) {
-                Event event = m_queue.front();
+                Event event = m_queue.top();
                 m_queue.pop();
                 return event;
             }
@@ -60,7 +67,11 @@ public:
     }
 
 private:
-    std::queue<Event> m_queue;
+    // The kernel transport is an SLIST and therefore LIFO. Order the
+    // analysis side by the shared timestamp before correlation. This fixes
+    // inversion inside a burst; it does not make late cross-source events
+    // disappear or prove a total order that the providers do not expose.
+    std::priority_queue<Event, std::vector<Event>, EventTimestampOrder> m_queue;
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     bool m_stop{false};

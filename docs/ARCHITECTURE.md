@@ -85,6 +85,7 @@ Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor d
 - Si el buffer de salida no alcanza para un evento válido, el driver lo vuelve a insertar y devuelve el tamaño requerido; esa consulta no se cuenta como pérdida.
 - El device limita el acceso mediante ACL y los bits del IOCTL. Tras una policy válida, el driver conserva una referencia al objeto `PEPROCESS` que estableció la sesión protegida, no un nombre ni un PID; limpia esa referencia cuando el proceso termina. El servicio vuelve a abrir el device si se desconecta.
 - La cola kernel->user es acotada para que el flujo de eventos no convierta una ráfaga en crecimiento sin límite de memoria. La cola de análisis user-mode también expone profundidad, high-water mark y descartes por tipo para hacer visible la presión de transporte.
+- El driver usa una `SLIST` LIFO; al entrar al `EventBus`, la cola de análisis prioriza el `Timestamp` compartido para no invertir una ráfaga antes de heurísticas y correlación. Esto no corrige eventos tardíos entre proveedores ni establece un orden total que el ABI no entregue.
 
 ## 4. Qué prueba cada gate
 
