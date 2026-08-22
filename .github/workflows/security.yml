@@ -2,7 +2,12 @@ name: Security Audit
 on:
   workflow_dispatch:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: tds-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   audit:
     runs-on: windows-2022
