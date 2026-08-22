@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 common = (ROOT / "ThreatDetectionSuite/TDSCommon/TDSCommon.h").read_text(encoding="utf-8-sig")
 bridge = (ROOT / "tools/bridge/TDSBridge.cpp").read_text(encoding="utf-8-sig")
 service = (ROOT / "ThreatDetectionSuite/TDSEngine/TDSService.cpp").read_text(encoding="utf-8-sig")
+driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
 engine = (ROOT / "ThreatDetectionSuite/TDSEngine/TDSEngine.cpp").read_text(encoding="utf-8-sig")
 correlator = (ROOT / "ThreatDetectionSuite/TDSEngine/correlator/SequenceCorrelator.cpp").read_text(encoding="utf-8-sig")
 
@@ -29,6 +30,12 @@ if "METHOD_OUT_DIRECT" in common:
     raise SystemExit("event IOCTL must use METHOD_BUFFERED while the driver copies SystemBuffer")
 if "TDS_RESPONSE_MODE" not in service:
     raise SystemExit("service response policy wiring missing")
+if "FILE_WRITE_ACCESS" not in common or "FILE_READ_ACCESS" not in common:
+    raise SystemExit("IOCTL access contract is not separated")
+if "CmRegisterCallbackEx" not in driver or "g_RegistryCallbackRegistered" not in driver:
+    raise SystemExit("registry callback is declared but not registered and cleaned up")
+if driver.count("if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4)") != 1:
+    raise SystemExit("WFP ALE IPv4 condition must have one guarded path")
 if "const uint32_t targetPid = data->TargetPid" not in engine:
     raise SystemExit("injection response must target the decoded target PID")
 if "TDSEventEtwTiApcInjection" not in correlator or "EarlyInitializationPattern" not in correlator:
@@ -48,8 +55,8 @@ if "IOCTL_TDS_SET_RUNTIME_POLICY" not in common or "IOCTL_TDS_SET_RUNTIME_POLICY
     raise SystemExit("runtime policy IOCTL contract missing")
 if "IoValidateDeviceIoControlAccess(Irp, FILE_WRITE_ACCESS)" not in driver or "IoValidateDeviceIoControlAccess(Irp, FILE_READ_ACCESS)" not in driver:
     raise SystemExit("explicit policy/event IOCTL access validation missing")
-if "FILE_ANY_ACCESS" not in common:
-    raise SystemExit("shared IOCTL ABI unexpectedly changed")
+if "FILE_ANY_ACCESS" in common:
+    raise SystemExit("shared IOCTL ABI leaves a privileged operation at FILE_ANY_ACCESS")
 if "IoCreateDeviceSecure" not in driver:
     raise SystemExit("driver device ACL is not enforced")
 if "IsAuthorizedPolicyCaller" not in driver:

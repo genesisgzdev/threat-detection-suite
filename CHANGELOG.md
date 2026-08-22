@@ -12,6 +12,7 @@
 - Added Windows user-mode CI, shared-contract checks, WDK project metadata and WiX packaging inputs.
 - Attributed remote-thread, APC and ETW-TI responses to the decoded target PID instead of the telemetry emitter.
 - Correlated ETW/APC signals during process initialization; the repository does not label this Early Bird proof until native ground-truth validation exists.
+- Registered the declared Registry callback, separated read/write IOCTL access bits and removed the duplicate WFP classify guard.
 - Registered process, image and thread notifications and exposed queue depth and dropped-event counters.
 - Corrected the WFP contract to describe the registered ALE IPv4 callout.
 - Self-protection now uses the service PID captured through the policy IOCTL instead of an executable name.

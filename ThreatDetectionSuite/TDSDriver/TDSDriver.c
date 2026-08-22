@@ -27,6 +27,7 @@ volatile LONG g_EventCount = 0;
 volatile LONG g_DroppedEventCount = 0;
 BOOLEAN g_ThreadNotifyRegistered = FALSE;
 BOOLEAN g_ImageNotifyRegistered = FALSE;
+BOOLEAN g_RegistryCallbackRegistered = FALSE;
 
 // WFP handles
 HANDLE g_EngineHandle = NULL;
@@ -231,9 +232,7 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
         ULONG pid = (ULONG)inMetaValues->processId;
         if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) {
             UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT].value.uint16;
-        if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) {
-            UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT].value.uint16;
-            if (!g_Policy.ObserveOnly && g_Policy.AllowNetworkContainment &&
+            if (!policy.ObserveOnly && policy.AllowNetworkContainment &&
                 port == 53 && inMetaValues->packetSize > 512) {
                 classifyOut->actionType = FWP_ACTION_BLOCK;
                 return;
@@ -313,6 +312,27 @@ FLT_PREOP_CALLBACK_STATUS TDSPreWriteCallback(_Inout_ PFLT_CALLBACK_DATA Data, _
 CONST FLT_OPERATION_REGISTRATION Callbacks[] = { { IRP_MJ_WRITE, 0, TDSPreWriteCallback, NULL }, { IRP_MJ_OPERATION_END } };
 CONST FLT_REGISTRATION FilterRegistration = { sizeof(FLT_REGISTRATION), FLT_REGISTRATION_VERSION, 0, NULL, Callbacks, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 
+NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument2) {
+    UNREFERENCED_PARAMETER(CallbackContext);
+    UNREFERENCED_PARAMETER(Argument2);
+    const REG_NOTIFY_CLASS notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)Argument1;
+    TDS_EVENT_TYPE eventType;
+    if (notifyClass == RegNtPreSetValueKey) eventType = TDSEventRegistrySet;
+    else if (notifyClass == RegNtPreDeleteValueKey) eventType = TDSEventRegistryDelete;
+    else return STATUS_SUCCESS;
+
+    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
+    if (!item) return STATUS_SUCCESS;
+    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER));
+    PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+    header->Type = eventType;
+    header->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+    header->DataSize = 0;
+    KeQuerySystemTimePrecise(&header->Timestamp);
+    QueueTDSEvent(item);
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
     UNREFERENCED_PARAMETER(RegistryPath); UNICODE_STRING deviceName, symLink, deviceSddl;
     RtlInitUnicodeString(&deviceName, L"\\Device\\TDS_Core_Kernel"); RtlInitUnicodeString(&symLink, L"\\DosDevices\\TDS_Core_Link");
@@ -333,18 +353,27 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
     ExInitializeNpagedLookasideList(&g_EventLookasideList, NULL, NULL, 0, MAX_EVENT_BUFFER_SIZE + sizeof(EVENT_ITEM), 'SDTe', 0);
     status = PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, FALSE);
     if (!NT_SUCCESS(status)) { IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    UNICODE_STRING registryAltitude;
+    RtlInitUnicodeString(&registryAltitude, L"385121");
+    status = CmRegisterCallbackEx(RegistryCallback, &registryAltitude, DriverObject, NULL, &g_RegistryCookie, NULL);
+    if (!NT_SUCCESS(status)) {
+        PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+        IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
+    }
+    g_RegistryCallbackRegistered = TRUE;
     status = PsSetCreateThreadNotifyRoutine(ThreadNotifyRoutine);
-    if (!NT_SUCCESS(status)) { PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    if (!NT_SUCCESS(status)) { CmUnRegisterCallback(g_RegistryCookie); g_RegistryCallbackRegistered = FALSE; PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
     g_ThreadNotifyRegistered = TRUE;
     status = PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
-    if (!NT_SUCCESS(status)) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    if (!NT_SUCCESS(status)) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; CmUnRegisterCallback(g_RegistryCookie); g_RegistryCallbackRegistered = FALSE; PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
     g_ImageNotifyRegistered = TRUE;
     status = InitializeWFP(g_DeviceObject);
-    if (!NT_SUCCESS(status)) { PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    if (!NT_SUCCESS(status)) { if (g_ImageNotifyRegistered) { PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine); g_ImageNotifyRegistered = FALSE; } if (g_ThreadNotifyRegistered) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; } CmUnRegisterCallback(g_RegistryCookie); g_RegistryCallbackRegistered = FALSE; PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
     status = RegisterProtectionCallbacks();
     if (!NT_SUCCESS(status)) {
         if (g_ImageNotifyRegistered) { PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine); g_ImageNotifyRegistered = FALSE; }
         if (g_ThreadNotifyRegistered) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; }
+        if (g_RegistryCallbackRegistered) { CmUnRegisterCallback(g_RegistryCookie); g_RegistryCallbackRegistered = FALSE; }
         PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
         CleanupWFP();
         IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
@@ -354,6 +383,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
     if (!NT_SUCCESS(status)) {
         if (g_FilterHandle) { FltUnregisterFilter(g_FilterHandle); g_FilterHandle = NULL; }
         if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
+        if (g_RegistryCallbackRegistered) { CmUnRegisterCallback(g_RegistryCookie); g_RegistryCallbackRegistered = FALSE; }
         PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
         CleanupWFP();
         IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
@@ -366,6 +396,7 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     UNICODE_STRING symLink; RtlInitUnicodeString(&symLink, L"\\DosDevices\\TDS_Core_Link"); IoDeleteSymbolicLink(&symLink);
     if (g_FilterHandle) { FltUnregisterFilter(g_FilterHandle); g_FilterHandle = NULL; }
     if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
+    if (g_RegistryCallbackRegistered) { CmUnRegisterCallback(g_RegistryCookie); g_RegistryCallbackRegistered = FALSE; }
     CleanupWFP();
     PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
     if (g_ImageNotifyRegistered) { PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine); g_ImageNotifyRegistered = FALSE; }
