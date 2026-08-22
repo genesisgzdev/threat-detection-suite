@@ -61,6 +61,11 @@ if "if (event.Type == TDSEventProcessCreate)" not in heuristics or "m_processCon
     raise SystemExit("heuristic context must reset on a new PID generation")
 if "IsServiceProcess(targetProcess) || IsLsass(targetProcess)" not in driver:
     raise SystemExit("LSASS protection helper is not wired into the object callback")
+minifilter = driver[driver.index("FLT_PREOP_CALLBACK_STATUS TDSPreWriteCallback"):driver.index("CONST FLT_OPERATION_REGISTRATION Callbacks")]
+if "FltGetRequestorProcess(Data)" not in minifilter or "PsGetProcessId(req)" not in minifilter:
+    raise SystemExit("minifilter events must use the I/O requestor process identity")
+if "PsGetCurrentProcessId()" in minifilter:
+    raise SystemExit("minifilter attribution must not use the callback worker process")
 if "SaveToDisk() {}" in correlator or "LoadFromDisk() {}" in correlator:
     raise SystemExit("sequence correlator must not expose empty persistence hooks")
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")

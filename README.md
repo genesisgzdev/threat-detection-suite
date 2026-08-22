@@ -73,7 +73,7 @@ Protection of critical processes (such as LSASS and the TDS user-mode service) i
 
 ### 5. Minifilter Reentrancy Prevention
 To prevent infinite recursion deadlocks—where the EDR intercepts its own log writes—the driver implements requestor-awareness.
-- `TDSPreWriteCallback` invokes `FltGetRequestorProcess()`. If the originating process is the TDS user-mode service, the IRP is skipped (`FLT_PREOP_SUCCESS_NO_CALLBACK`).
+- `TDSPreWriteCallback` invokes `FltGetRequestorProcess()`. If the originating process is the TDS user-mode service, the IRP is skipped (`FLT_PREOP_SUCCESS_NO_CALLBACK`). Events use `PsGetProcessId(requestor)` because the callback may run on a filesystem worker thread; `PsGetCurrentProcessId()` is not treated as the originator.
 - The registration currently covers writes. Paging-I/O exclusion is not claimed by the source and must not be inferred from the documentation.
 
 ### 6. User-Mode Memory Scanning and YARA

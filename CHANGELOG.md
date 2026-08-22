@@ -33,6 +33,7 @@
 - Registered process, image and thread notifications and exposed queue depth and dropped-event counters.
 - Corrected the WFP contract to describe the registered ALE IPv4 callout.
 - Self-protection now uses the service PID captured through the policy IOCTL instead of an executable name.
+- Minifilter ransomware events now use the filesystem requestor process rather than the callback worker process; the contract check prevents this attribution from regressing.
 
 All notable changes to the Threat Detection Suite (TDS) project will be documented in this file.
 

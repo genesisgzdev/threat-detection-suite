@@ -340,8 +340,17 @@ FLT_PREOP_CALLBACK_STATUS TDSPreWriteCallback(_Inout_ PFLT_CALLBACK_DATA Data, _
     if (Data->Iopb->Parameters.Write.Length > 65536) {
         PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
         if (item) {
+            if (!req) {
+                ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
+                return FLT_PREOP_SUCCESS_NO_CALLBACK;
+            }
             RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER));
-            PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1); h->Type = TDSEventRansomwareActivity; h->ProcessId = HandleToUlong(PsGetCurrentProcessId());
+            PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1);
+            h->Type = TDSEventRansomwareActivity;
+            // Filesystem callbacks may run on worker threads. The event must
+            // identify the process that submitted the I/O request.
+            h->ProcessId = HandleToUlong(PsGetProcessId(req));
+            KeQuerySystemTimePrecise(&h->Timestamp);
             QueueTDSEvent(item);
         }
     }
