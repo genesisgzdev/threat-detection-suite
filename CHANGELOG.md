@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Actualiza checkout en CI, auditoría y releases a la generación que ejecuta sobre Node 24.
+- Actualiza `setup-python` a la generación que ejecuta sobre Node 24.
 
 ## [5.6.7] - 2026-08-22
 
