@@ -18,7 +18,6 @@ DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) SLIST_HEADER g_EventQueueHead;
 
 PVOID g_ObRegistrationHandle = NULL;
 LARGE_INTEGER g_RegistryCookie = {0};
-ULONG g_EdrPid = 0;
 ULONG g_ServicePid = 0; 
 BOOLEAN g_MonitoringActive = FALSE;
 TDS_PROTECTION_POLICY g_Policy = { 1, sizeof(TDS_PROTECTION_POLICY), TDS_POLICY_FLAG_PROTECT_SERVICE, 1, 0, 0, {0, 0, 0} };
@@ -61,20 +60,10 @@ void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIM
 void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create);
 NTSTATUS RegistryCallback(PVOID CallbackContext, PVOID Argument1, PVOID Argument2);
 OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERATION_INFORMATION OperationInformation);
-BOOLEAN IsEdrProcess(PEPROCESS Process);
-
 static BOOLEAN IsAuthorizedPolicyCaller(PIRP Irp) {
-    HANDLE requestorPid = IoGetRequestorProcessId(Irp);
-    PEPROCESS requestorProcess = NULL;
-    BOOLEAN authorized = FALSE;
-
-    if (NT_SUCCESS(PsLookupProcessByProcessId(requestorPid, &requestorProcess))) {
-        // The device ACL limits access to SYSTEM/Administrators; the image check
-        // prevents an unrelated privileged process from claiming service control.
-        authorized = IsEdrProcess(requestorProcess);
-        ObDereferenceObject(requestorProcess);
-    }
-    return authorized;
+    // Authorization is established by the secure device ACL and the IOCTL
+    // access bit. Do not infer identity from an executable name or path.
+    return NT_SUCCESS(IoValidateDeviceIoControlAccess(Irp, FILE_WRITE_ACCESS));
 }
 
 static NTSTATUS RegisterProtectionCallbacks(void) {
