@@ -10,14 +10,14 @@ La primera figura muestra el camino de un evento. La secuencia muestra el arranq
 
 ~~~mermaid
 flowchart LR
-    subgraph KERNEL[Windows kernel - TDSDriver.vcxproj]
-      PROC[process/image/thread callbacks]
+    subgraph KERNEL[Windows kernel driver]
+      PROC[process image thread callbacks]
       REG[registry callback]
       NET[WFP callouts]
       MINI[minifilter callbacks]
-      Q[bounded SLIST event queue]
-      ABI[TDSCommon.h event and policy ABI]
-      DEV[device TDS_Core_Link]
+      Q[bounded event queue]
+      ABI[event and policy ABI]
+      DEV[driver device]
       PROC --> Q
       REG --> Q
       NET --> Q
@@ -27,18 +27,18 @@ flowchart LR
     subgraph USER[CMake user mode]
       S[TDSService Windows service]
       E[TDSEngine]
-      H[HeuristicsEngine + detectors]
+      H[heuristics and detectors]
       C[SequenceCorrelator]
       L[Logger JSONL rotation]
       S --> E --> H
       E --> C
       E --> L
     end
-    DEV -->|GET_NEXT_EVENT buffered IOCTL| S
-    S -->|SET_PROTECTION_POLICY| DEV
-    ETW[EtwCollector / ETW-TI] --> E
+    DEV -->|buffered event IOCTL| S
+    S -->|policy IOCTL| DEV
+    ETW[ETW telemetry] --> E
     B[TDSBridge utility] --> E
-    L --> SOC[tools/soc TDSWatcher OTLP exporter]
+    L --> SOC[SOC and OTLP tools]
 ~~~
 
 Precisión de build:
