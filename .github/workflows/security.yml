@@ -13,9 +13,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: github/codeql-action/init@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+      - uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
         with:
           languages: c-cpp
+          build-mode: manual
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
@@ -23,7 +24,7 @@ jobs:
         run: cmake -S . -B build -A x64 -DTDS_ENABLE_YARA=OFF
       - name: Build user-mode code for CodeQL
         run: cmake --build build --config Release --parallel
-      - uses: github/codeql-action/analyze@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+      - uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
       - name: Secret scan
         shell: pwsh
         run: |
