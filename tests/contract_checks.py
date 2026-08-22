@@ -111,5 +111,9 @@ if "std::priority_queue<Event, std::vector<Event>, EventTimestampOrder>" not in 
     raise SystemExit("analysis queue must order events by shared timestamp")
 if "Requeue it instead of turning a sizing mistake into" not in driver or "InterlockedPushEntrySList(&g_EventQueueHead, &item->ListEntry);" not in driver:
     raise SystemExit("undersized event reads must preserve the queued event")
+flt_failure = driver[driver.index("status = FltRegisterFilter"):driver.index("return STATUS_SUCCESS;", driver.index("status = FltRegisterFilter"))]
+for marker in ("PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine)", "PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine)"):
+    if marker not in flt_failure:
+        raise SystemExit("filter startup rollback must unregister every registered notify callback")
 
 print("TDS contract checks: ok")

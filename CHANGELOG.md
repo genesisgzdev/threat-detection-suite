@@ -22,6 +22,7 @@
 
 ## [Unreleased]
 
+- Corrige la ruta de fallo de carga del minifilter para desregistrar también las callbacks de imagen e hilo antes de descargar el driver.
 - La respuesta user-mode suprime containment/termination para procesos protegidos y del sistema como barrera adicional contra false positives.
 - El callback de protección conecta la verificación de LSASS además de la identidad `PEPROCESS` del servicio.
 - Las flags `ENABLE_WFP` y `ENABLE_MINIFILTER` gobiernan sus callbacks; el servicio las solicita explícitamente y los checks de contrato lo verifican.

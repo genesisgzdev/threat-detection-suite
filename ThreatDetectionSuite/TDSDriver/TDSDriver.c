@@ -432,6 +432,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
         if (g_FilterHandle) { FltUnregisterFilter(g_FilterHandle); g_FilterHandle = NULL; }
         if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
         if (g_RegistryCallbackRegistered) { CmUnRegisterCallback(g_RegistryCookie); g_RegistryCallbackRegistered = FALSE; }
+        if (g_ImageNotifyRegistered) { PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine); g_ImageNotifyRegistered = FALSE; }
+        if (g_ThreadNotifyRegistered) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; }
         PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
         CleanupWFP();
         IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
