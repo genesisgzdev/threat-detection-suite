@@ -62,6 +62,8 @@ Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites an
 
 `TDS_POLICY_FLAG_PROTECT_SERVICE` controla el filtrado de handles contra el proceso del servicio, sus hilos y la imagen LSASS verificada. `TDS_POLICY_FLAG_ENABLE_WFP` y `TDS_POLICY_FLAG_ENABLE_MINIFILTER` controlan la emisión de sus callbacks registrados; el servicio solicita explícitamente esas señales al aplicar la policy. La protección no se activa por el mero hecho de abrir el device; cada callback toma una copia de la política vigente antes de decidir.
 
+La respuesta user-mode aplica además una barrera deny-only para PID 0-4, `lsass.exe` y `TDSService.exe` antes de suspender o terminar. Esa barrera no autentica procesos ni sustituye el ACL del device; evita que un false positive de heurística convierta la respuesta automática en una caída del sistema.
+
 El `EventBus` de user-mode mantiene una segunda cola acotada para el análisis. Sus métricas separan profundidad actual, máximo observado, descartados totales y descartados por tipo de evento. Un descarte en cualquiera de las dos colas significa telemetría incompleta; no se interpreta como ausencia de actividad.
 
 ### 4. Process Tamper Protection

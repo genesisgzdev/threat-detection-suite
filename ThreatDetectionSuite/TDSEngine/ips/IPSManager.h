@@ -20,6 +20,9 @@ public:
     
     // Null-routes specific C2 connections at the TCP stack level using extended APIs
     static bool TerminateNetworkConnection(DWORD pid, const std::string& remoteIp);
+
+private:
+    static bool IsProtectedProcess(DWORD pid);
 };
 
 } // namespace TDS

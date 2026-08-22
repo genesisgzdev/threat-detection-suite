@@ -87,6 +87,9 @@ if "IoCreateDeviceSecure" not in driver:
     raise SystemExit("driver device ACL is not enforced")
 if "IsAuthorizedPolicyCaller" not in driver:
     raise SystemExit("policy caller authorization check missing")
+ips = (ROOT / "ThreatDetectionSuite/TDSEngine/ips/IPSManager.cpp").read_text(encoding="utf-8-sig")
+if "IsProtectedProcess" not in ips or 'L"lsass.exe"' not in ips or 'L"TDSService.exe"' not in ips:
+    raise SystemExit("user-mode response deny-list for protected processes is missing")
 if "IsEdrProcess" in driver or "TDSService.exe" in driver:
     raise SystemExit("driver policy authorization must not rely on an executable name")
 if "code == IOCTL_TDS_SET_PROTECTION_POLICY || code == IOCTL_TDS_SET_RUNTIME_POLICY" not in driver:

@@ -22,6 +22,7 @@
 
 ## [Unreleased]
 
+- La respuesta user-mode suprime containment/termination para procesos protegidos y del sistema como barrera adicional contra false positives.
 - El callback de protección conecta la verificación de LSASS además de la identidad `PEPROCESS` del servicio.
 - Las flags `ENABLE_WFP` y `ENABLE_MINIFILTER` gobiernan sus callbacks; el servicio las solicita explícitamente y los checks de contrato lo verifican.
 - Ordena la cola user-mode por timestamp compartido para compensar el transporte LIFO del driver antes de ejecutar heurísticas y correlación.
