@@ -73,6 +73,11 @@ if "PsGetCurrentProcessId()" in minifilter:
 if "SaveToDisk() {}" in correlator or "LoadFromDisk() {}" in correlator:
     raise SystemExit("sequence correlator must not expose empty persistence hooks")
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
+fuzzer = (ROOT / "tools/fuzzer_advanced.cpp").read_text(encoding="utf-8-sig")
+if "static_cast<DWORD>(target_size)" in fuzzer and "DeviceIoControl" in fuzzer:
+    raise SystemExit("IOCTL fuzzer must not claim a size larger than its backing allocation")
+if "const DWORD input_length = static_cast<DWORD>(alloc_size)" not in fuzzer:
+    raise SystemExit("IOCTL fuzzer must cap input length to the allocated buffer")
 for marker in ("PsSetCreateThreadNotifyRoutine", "PsSetLoadImageNotifyRoutine", "g_DroppedEventCount", "g_EventHighWatermark", "FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT", "data->ImagePathOffset = sizeof(TDS_PROCESS_EVENT_DATA)"):
     if marker not in driver:
         raise SystemExit(f"driver runtime marker missing: {marker}")

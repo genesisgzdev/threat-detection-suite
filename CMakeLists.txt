@@ -18,6 +18,7 @@ endif()
 # External Dependencies (YARA). The path is supplied by the build environment;
 # no developer workstation path is part of the project configuration.
 option(TDS_ENABLE_YARA "Enable YARA memory scanning" OFF)
+option(TDS_BUILD_FUZZER "Build the Windows IOCTL fuzz harness" OFF)
 set(TDS_YARA_ROOT "" CACHE PATH "Root of the YARA SDK")
 if(TDS_ENABLE_YARA)
     find_path(YARA_INCLUDE_DIR yara.h
@@ -64,16 +65,24 @@ add_executable(TDSService
 target_link_libraries(TDSService ${TDS_EXTERNAL_LIBS})
 
 # Integration Bridge & Test Utility
-add_executable(TDSBridge 
+add_executable(TDSBridge
     tools/bridge/TDSBridge.cpp
     $<TARGET_OBJECTS:TDSCore>
 )
 target_link_libraries(TDSBridge ${TDS_EXTERNAL_LIBS})
 
+if(TDS_BUILD_FUZZER)
+    add_executable(TDSIoctlFuzzer tools/fuzzer_advanced.cpp)
+    target_link_libraries(TDSIoctlFuzzer advapi32)
+endif()
+
 # Installation Target
 install(TARGETS TDSService TDSBridge
     RUNTIME DESTINATION bin
 )
+if(TDS_BUILD_FUZZER)
+    install(TARGETS TDSIoctlFuzzer RUNTIME DESTINATION bin)
+endif()
 
 # Testing Configuration
 enable_testing()
