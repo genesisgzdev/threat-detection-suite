@@ -82,7 +82,7 @@ Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor d
 - Policy IOCTL exige `FILE_WRITE_ACCESS`, tamaño exacto, versión 1, flags conocidos y campos reservados en cero.
 - Event IOCTL exige `FILE_READ_ACCESS`, buffer de salida suficiente y el límite `MAX_EVENT_BUFFER_SIZE`.
 - El driver comprueba que el solicitante de la policy sea el proceso TDS autorizado; el servicio vuelve a abrir el device si se desconecta.
-- La cola es acotada para que el flujo de eventos no convierta una ráfaga en crecimiento sin límite de memoria.
+- La cola kernel->user es acotada para que el flujo de eventos no convierta una ráfaga en crecimiento sin límite de memoria. La cola de análisis user-mode también expone profundidad, high-water mark y descartes por tipo para hacer visible la presión de transporte.
 
 ## 4. Qué prueba cada gate
 
