@@ -20,7 +20,10 @@ The Threat Detection Suite (TDS) operates across two primary execution rings: Ke
 ```mermaid
 graph TD;
     subgraph Ring 0 [Kernel Mode]
-        WFP[WFP Sublayer Filter] --> |Network Telemetry| EL[Event Lookaside List];
+        WFP[WFP ALE IPv4 callout] --> |Network Telemetry| EL[Event Lookaside List];
+        PROC[Process callback] --> EL;
+        IMG[Image callback] --> EL;
+        THR[Thread callback] --> EL;
         MF[Minifilter Callback] --> |File I/O Telemetry| EL;
         OB[ObRegisterCallbacks] --> |Process Handle Req| EL;
         EL --> |InterlockedPushEntrySList| SList[Lock-Free SList Queue];
@@ -46,31 +49,25 @@ graph TD;
 ## Core Implementation Details
 
 ### 1. Windows Filtering Platform (WFP)
-The network filter operates independently of the standard Windows Firewall by registering a custom WFP Sublayer (`TDS_SUBLAYER_GUID`).
-- **Weight**: Set to `0xFFFF`, ensuring the TDS callouts inspect network traffic prior to third-party consumer filters.
-- **Loopback Exclusion**: Drops traffic with the `FWP_CONDITION_FLAG_IS_LOOPBACK` flag at the BFE engine level, eliminating unnecessary Inter-Process Communication (IPC) noise.
-- **Protocol Precision**: The callout targets `FWPS_LAYER_DATAGRAM_DATA_V4` and `V6`. It intercepts UDP packets on port 53; payloads exceeding 512 bytes are actively dropped (`FWP_ACTION_BLOCK`), neutralizing DNS tunneling exfiltration.
+El driver registra hoy un sublayer dinámico y un callout en `FWPS_LAYER_ALE_AUTH_CONNECT_V4`. El callback observa conexiones IPv4 y, cuando la política permite containment, bloquea el caso implementado para tráfico remoto al puerto 53 con tamaño superior a 512 bytes. No se debe leer este código como cobertura IPv6 o de `DATAGRAM_DATA`: esas capas no están registradas en el camino actual.
 
 ### 2. Lock-Free Telemetry Queuing
 Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ransomware encrypting a drive) causes severe processor contention.
 - **Memory Allocation**: The driver initializes an `NPAGED_LOOKASIDE_LIST` during `DriverEntry`. High-frequency callbacks allocate event buffers from this pool, guaranteeing constant-time, fragmentation-free allocation.
 - **Queueing**: Events are pushed to an `SLIST_HEADER` using `InterlockedPushEntrySList`. The user-mode service retrieves them via `IOCTL_TDS_GET_NEXT_EVENT` using `InterlockedPopEntrySList`. This completely eliminates spinning waits.
 
-### 3. Kernel Exception Handling (Anti-Fuzzing)
-The `TDSDispatchDeviceControl` routine is hardened against user-mode fuzzing attacks.
-- Structured Exception Handling (`__try / __except(EXCEPTION_EXECUTE_HANDLER)`) wraps all IRP buffer accesses.
-- `ProbeForRead` and `ProbeForWrite` are strictly enforced for `METHOD_NEITHER` I/O.
-- If a malicious process sends a corrupted pointer or oversized buffer length, the kernel catches the `STATUS_ACCESS_VIOLATION` and gracefully fails the IRP, preventing a Bug Check (BSOD).
+### 3. IOCTL boundary and queue pressure
+Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites antes de copiar datos. `IOCTL_TDS_GET_QUEUE_STATS` expone profundidad y eventos descartados; cuando la cola llega a `EVENT_QUEUE_LIMIT`, el driver descarta el evento y aumenta el contador en vez de crecer sin límite. La fuzzing de IRP, Driver Verifier y las pruebas de unload siguen siendo validación nativa pendiente.
 
 ### 4. Process Tamper Protection
 Protection of critical processes (such as LSASS and the TDS user-mode service) is implemented via `ObRegisterCallbacks`.
-- **Signature Verification**: `IsLsass()` relies on `PsGetProcessSignatureLevel()`. It demands a Microsoft signing level (`>= 7`) before comparing process paths. This defeats trivial path spoofing.
+- **Identity**: the service PID is captured from the process that successfully sets the policy through the device IOCTL. LSASS still uses `PsGetProcessSignatureLevel()` and a system path check. The service path is not used as an authorization primitive.
 - **Access Stripping**: Handles requesting `PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `PROCESS_SUSPEND_RESUME`, or `PROCESS_CREATE_THREAD` against protected PIDs have those flags stripped from their `DesiredAccess` mask by the kernel.
 
 ### 5. Minifilter Reentrancy Prevention
 To prevent infinite recursion deadlocks—where the EDR intercepts its own log writes—the driver implements requestor-awareness.
 - `TDSPreWriteCallback` invokes `FltGetRequestorProcess()`. If the originating process is the TDS user-mode service, the IRP is skipped (`FLT_PREOP_SUCCESS_NO_CALLBACK`).
-- All file operations utilize the `FLTFL_OPERATION_REGISTRATION_SKIP_PAGING_IO` flag to avoid deadlocks with the Windows Memory Manager.
+- The registration currently covers writes. Paging-I/O exclusion is not claimed by the source and must not be inferred from the documentation.
 
 ### 6. User-Mode Memory Scanning and YARA
 The `MemoryScanner` class integrates `libyara` directly into the C++ runtime.

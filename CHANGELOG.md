@@ -10,6 +10,9 @@
 - Made response enforcement observe-first with explicit `contain` and `terminate` modes.
 - Added local log rotation, optional forensics, OTLP/HTTP export and Windows service recovery tooling.
 - Added Windows user-mode CI, shared-contract checks, WDK project metadata and WiX packaging inputs.
+- Registered process, image and thread notifications and exposed queue depth and dropped-event counters.
+- Corrected the WFP contract to describe the registered ALE IPv4 callout.
+- Self-protection now uses the service PID captured through the policy IOCTL instead of an executable name.
 
 All notable changes to the Threat Detection Suite (TDS) project will be documented in this file.
 
