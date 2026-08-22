@@ -122,7 +122,7 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
         return CompleteIrp(Irp, accessStatus, 0);
     }
 
-    if (code == IOCTL_TDS_SET_PROTECTION_POLICY) {
+    if (code == IOCTL_TDS_SET_PROTECTION_POLICY || code == IOCTL_TDS_SET_RUNTIME_POLICY) {
         if (!IsAuthorizedPolicyCaller(Irp)) {
             return CompleteIrp(Irp, STATUS_ACCESS_DENIED, 0);
         }
