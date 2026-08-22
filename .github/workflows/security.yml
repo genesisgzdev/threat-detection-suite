@@ -5,7 +5,7 @@ on:
   pull_request:
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
     permissions:
       contents: read
       security-events: write
@@ -16,9 +16,21 @@ jobs:
       - uses: github/codeql-action/init@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
         with:
           languages: c-cpp
-          build-mode: none
-      - uses: github/codeql-action/analyze@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure user-mode build for CodeQL
+        run: cmake -S . -B build -A x64 -DTDS_ENABLE_YARA=OFF
+      - name: Build user-mode code for CodeQL
+        run: cmake --build build --config Release --parallel
+      - uses: github/codeql-action/analyze@v3
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = '8.24.3'
+          $archive = Join-Path $env:RUNNER_TEMP "gitleaks-$version.zip"
+          $install = Join-Path $env:RUNNER_TEMP "gitleaks-$version"
+          $url = "https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_windows_x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $install -Force
+          & (Join-Path $install 'gitleaks.exe') detect --source . --redact --exit-code 1 --no-banner

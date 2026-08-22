@@ -62,6 +62,16 @@ static std::optional<TDS::Event> DecodeKernelEvent(const BYTE* buffer, DWORD byt
         event.Data = std::move(process);
         break;
     }
+    case TDSEventImageLoad: {
+        if (header->DataSize < sizeof(TDS_IMAGE_LOAD_DATA)) break;
+        const auto* raw = reinterpret_cast<const TDS_IMAGE_LOAD_DATA*>(data);
+        TDS::ImageLoadEvent image{};
+        image.LoadAddress = raw->LoadAddress;
+        image.ImageSize = raw->ImageSize;
+        ReadWideString(data, header->DataSize, raw->ImagePathOffset, image.ImagePath);
+        event.Data = std::move(image);
+        break;
+    }
     case TDSEventNetworkConnect: {
         if (header->DataSize < sizeof(TDS_NETWORK_EVENT_DATA)) break;
         const auto* raw = reinterpret_cast<const TDS_NETWORK_EVENT_DATA*>(data);
@@ -209,6 +219,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 
     BYTE buffer[MAX_EVENT_BUFFER_SIZE];
     DWORD bytesReturned = 0;
+    TDS_QUEUE_STATS queueStats = {};
     while (WaitForSingleObject(g_ServiceStopEvent, 1000) == WAIT_TIMEOUT) {
         if (hDevice == INVALID_HANDLE_VALUE) {
             hDevice = OpenDriverWithPolicy(policy);
@@ -216,6 +227,11 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
                 WaitForSingleObject(g_ServiceStopEvent, 1000);
             }
             continue;
+        }
+        if (DeviceIoControl(hDevice, IOCTL_TDS_GET_QUEUE_STATS, NULL, 0,
+                            &queueStats, sizeof(queueStats), &bytesReturned, NULL) &&
+            queueStats.DroppedEvents > 0) {
+            OutputDebugStringW(L"TDS kernel event queue has dropped events\n");
         }
         while (DeviceIoControl(hDevice, IOCTL_TDS_GET_NEXT_EVENT, NULL, 0,
                                buffer, sizeof(buffer), &bytesReturned, NULL)) {

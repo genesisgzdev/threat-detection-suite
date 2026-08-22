@@ -19,7 +19,7 @@ missing = sorted(used - symbols)
 if missing:
     raise SystemExit(f"event symbols missing from shared ABI: {', '.join(missing)}")
 
-for ioctl in ("IOCTL_TDS_SET_PROTECTION_POLICY", "IOCTL_TDS_GET_NEXT_EVENT"):
+for ioctl in ("IOCTL_TDS_SET_PROTECTION_POLICY", "IOCTL_TDS_GET_NEXT_EVENT", "IOCTL_TDS_GET_QUEUE_STATS"):
     if ioctl not in common or ioctl not in service:
         raise SystemExit(f"IOCTL contract missing: {ioctl}")
 
@@ -27,6 +27,15 @@ if "METHOD_OUT_DIRECT" in common:
     raise SystemExit("event IOCTL must use METHOD_BUFFERED while the driver copies SystemBuffer")
 if "TDS_RESPONSE_MODE" not in service:
     raise SystemExit("service response policy wiring missing")
+driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
+for marker in ("PsSetCreateThreadNotifyRoutine", "PsSetLoadImageNotifyRoutine", "g_DroppedEventCount", "FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT", "data->ImagePathOffset = sizeof(TDS_PROCESS_EVENT_DATA)"):
+    if marker not in driver:
+        raise SystemExit(f"driver runtime marker missing: {marker}")
+if "case TDSEventImageLoad" not in service:
+    raise SystemExit("image-load decoder missing")
+cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8-sig")
+if "set_target_properties(TDSCore PROPERTIES" not in cmake:
+    raise SystemExit("shared TDSCore runtime library is not pinned")
 
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
 if "IOCTL_TDS_SET_RUNTIME_POLICY" not in common or "IOCTL_TDS_SET_RUNTIME_POLICY" not in driver:

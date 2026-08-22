@@ -24,6 +24,9 @@ BOOLEAN g_MonitoringActive = FALSE;
 TDS_PROTECTION_POLICY g_Policy = { 1, sizeof(TDS_PROTECTION_POLICY), TDS_POLICY_FLAG_PROTECT_SERVICE, 1, 0, 0, {0, 0, 0} };
 KSPIN_LOCK g_PolicyLock;
 volatile LONG g_EventCount = 0;
+volatile LONG g_DroppedEventCount = 0;
+BOOLEAN g_ThreadNotifyRegistered = FALSE;
+BOOLEAN g_ImageNotifyRegistered = FALSE;
 
 // WFP handles
 HANDLE g_EngineHandle = NULL;
@@ -167,6 +170,19 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
         return CompleteIrp(Irp, STATUS_SUCCESS, required);
     }
 
+    if (code == IOCTL_TDS_GET_QUEUE_STATS) {
+        if (outLength < sizeof(TDS_QUEUE_STATS) || Irp->AssociatedIrp.SystemBuffer == NULL) {
+            return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL, sizeof(TDS_QUEUE_STATS));
+        }
+        PTDS_QUEUE_STATS stats = (PTDS_QUEUE_STATS)Irp->AssociatedIrp.SystemBuffer;
+        RtlZeroMemory(stats, sizeof(*stats));
+        stats->Version = 1;
+        stats->Size = sizeof(*stats);
+        stats->QueueDepth = (ULONG)max(0, InterlockedCompareExchange(&g_EventCount, 0, 0));
+        stats->DroppedEvents = (ULONG)max(0, InterlockedCompareExchange(&g_DroppedEventCount, 0, 0));
+        return CompleteIrp(Irp, STATUS_SUCCESS, sizeof(*stats));
+    }
+
     return CompleteIrp(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
 }
 
@@ -176,16 +192,8 @@ PVOID GetProcessPeb(PEPROCESS Process) {
     return peb;
 }
 
-BOOLEAN IsEdrProcess(PEPROCESS Process) {
-    UNICODE_STRING edrName;
-    RtlInitUnicodeString(&edrName, L"TDSService.exe");
-    PUNICODE_STRING procName = NULL;
-    BOOLEAN match = FALSE;
-    if (NT_SUCCESS(SeLocateProcessImageName(Process, &procName))) {
-        if (RtlSuffixUnicodeString(&edrName, procName, TRUE)) match = TRUE;
-        ExFreePool(procName);
-    }
-    return match;
+BOOLEAN IsServiceProcess(PEPROCESS Process) {
+    return g_ServicePid != 0 && HandleToUlong(PsGetProcessId(Process)) == g_ServicePid;
 }
 
 BOOLEAN IsLsass(PEPROCESS Process) {
@@ -204,6 +212,7 @@ BOOLEAN IsLsass(PEPROCESS Process) {
 void QueueTDSEvent(PEVENT_ITEM item) {
     if (InterlockedIncrement(&g_EventCount) > EVENT_QUEUE_LIMIT) {
         InterlockedDecrement(&g_EventCount);
+        InterlockedIncrement(&g_DroppedEventCount);
         ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
         return;
     }
@@ -220,9 +229,11 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
     classifyOut->actionType = FWP_ACTION_PERMIT;
     if (inMetaValues->currentMetadataValues & FWPS_METADATA_FIELD_PROCESS_ID) {
         ULONG pid = (ULONG)inMetaValues->processId;
-        if (inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V4 || inFixedValues->layerId == FWPS_LAYER_DATAGRAM_DATA_V6) {
-            UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_DATAGRAM_DATA_V4_IP_REMOTE_PORT].value.uint16;
-            if (!policy.ObserveOnly && policy.AllowNetworkContainment &&
+        if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) {
+            UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT].value.uint16;
+        if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) {
+            UINT16 port = inFixedValues->incomingValue[FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT].value.uint16;
+            if (!g_Policy.ObserveOnly && g_Policy.AllowNetworkContainment &&
                 port == 53 && inMetaValues->packetSize > 512) {
                 classifyOut->actionType = FWP_ACTION_BLOCK;
                 return;
@@ -276,7 +287,7 @@ OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERA
     else if (OperationInformation->ObjectType == *PsThreadType) targetProcess = IoThreadToProcess((PETHREAD)OperationInformation->Object);
     if (!targetProcess) return OB_PREOP_SUCCESS;
     ULONG targetPid = HandleToUlong(PsGetProcessId(targetProcess));
-    if ((g_EdrPid != 0 && targetPid == g_EdrPid) || IsEdrProcess(targetProcess)) {
+    if (g_ServicePid != 0 && targetPid == g_ServicePid) {
         ACCESS_MASK forbidden = (OperationInformation->ObjectType == *PsProcessType) ? (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | PROCESS_CREATE_THREAD) : (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT);
         if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
         else OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
@@ -287,7 +298,7 @@ OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERA
 FLT_PREOP_CALLBACK_STATUS TDSPreWriteCallback(_Inout_ PFLT_CALLBACK_DATA Data, _In_ PCFLT_RELATED_OBJECTS FltObjects, _Outptr_opt_ PVOID *CompletionContext) {
     if (Data->RequestorMode == KernelMode || (Data->Iopb->IrpFlags & IRP_PAGING_IO)) return FLT_PREOP_SUCCESS_NO_CALLBACK;
     PEPROCESS req = FltGetRequestorProcess(Data);
-    if (req && IsEdrProcess(req)) return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    if (req && IsServiceProcess(req)) return FLT_PREOP_SUCCESS_NO_CALLBACK;
     if (Data->Iopb->Parameters.Write.Length > 65536) {
         PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
         if (item) {
@@ -322,10 +333,18 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
     ExInitializeNpagedLookasideList(&g_EventLookasideList, NULL, NULL, 0, MAX_EVENT_BUFFER_SIZE + sizeof(EVENT_ITEM), 'SDTe', 0);
     status = PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, FALSE);
     if (!NT_SUCCESS(status)) { IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    status = PsSetCreateThreadNotifyRoutine(ThreadNotifyRoutine);
+    if (!NT_SUCCESS(status)) { PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    g_ThreadNotifyRegistered = TRUE;
+    status = PsSetLoadImageNotifyRoutine(LoadImageNotifyRoutine);
+    if (!NT_SUCCESS(status)) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
+    g_ImageNotifyRegistered = TRUE;
     status = InitializeWFP(g_DeviceObject);
     if (!NT_SUCCESS(status)) { PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE); IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status; }
     status = RegisterProtectionCallbacks();
     if (!NT_SUCCESS(status)) {
+        if (g_ImageNotifyRegistered) { PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine); g_ImageNotifyRegistered = FALSE; }
+        if (g_ThreadNotifyRegistered) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; }
         PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
         CleanupWFP();
         IoDeleteSymbolicLink(&symLink); IoDeleteDevice(g_DeviceObject); return status;
@@ -349,6 +368,8 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     if (g_ObRegistrationHandle) { ObUnRegisterCallbacks(g_ObRegistrationHandle); g_ObRegistrationHandle = NULL; }
     CleanupWFP();
     PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
+    if (g_ImageNotifyRegistered) { PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine); g_ImageNotifyRegistered = FALSE; }
+    if (g_ThreadNotifyRegistered) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; }
     PSLIST_ENTRY entry;
     while ((entry = InterlockedPopEntrySList(&g_EventQueueHead)) != NULL) {
         PEVENT_ITEM item = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
@@ -362,15 +383,62 @@ void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTI
     UNREFERENCED_PARAMETER(Process);
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
     if (item) {
-        RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + sizeof(TDS_PROCESS_EVENT_DATA));
+        const ULONG maxData = MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER);
+        ULONG imageBytes = 0;
+        ULONG commandLineBytes = 0;
+        if (CreateInfo && CreateInfo->ImageFileName) imageBytes = min((ULONG)CreateInfo->ImageFileName->Length, maxData - sizeof(TDS_PROCESS_EVENT_DATA) - 2 * sizeof(wchar_t));
+        if (CreateInfo && CreateInfo->CommandLine) commandLineBytes = min((ULONG)CreateInfo->CommandLine->Length, maxData - sizeof(TDS_PROCESS_EVENT_DATA) - imageBytes - 2 * sizeof(wchar_t));
+        RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + sizeof(TDS_PROCESS_EVENT_DATA) + imageBytes + commandLineBytes + 2 * sizeof(wchar_t));
         PTDS_EVENT_HEADER h = (PTDS_EVENT_HEADER)(item + 1);
         h->Type = CreateInfo ? TDSEventProcessCreate : TDSEventProcessTerminate;
-        h->DataSize = CreateInfo ? sizeof(TDS_PROCESS_EVENT_DATA) : 0;
+        h->DataSize = CreateInfo ? sizeof(TDS_PROCESS_EVENT_DATA) + imageBytes + commandLineBytes + 2 * sizeof(wchar_t) : 0;
+        KeQuerySystemTimePrecise(&h->Timestamp);
         if (CreateInfo) {
             PTDS_PROCESS_EVENT_DATA data = (PTDS_PROCESS_EVENT_DATA)(h + 1);
             data->Create = TRUE;
             data->ParentProcessId = CreateInfo->ParentProcessId ? HandleToUlong(CreateInfo->ParentProcessId) : 0;
+            PUCHAR cursor = (PUCHAR)data + sizeof(TDS_PROCESS_EVENT_DATA);
+            data->ImagePathOffset = sizeof(TDS_PROCESS_EVENT_DATA);
+            if (imageBytes) {
+                RtlCopyMemory(cursor, CreateInfo->ImageFileName->Buffer, imageBytes);
+                cursor += imageBytes;
+            }
+            cursor += sizeof(wchar_t);
+            data->CommandLineOffset = (ULONG)(cursor - (PUCHAR)data);
+            if (commandLineBytes) RtlCopyMemory(cursor, CreateInfo->CommandLine->Buffer, commandLineBytes);
         }
         h->ProcessId = HandleToUlong(ProcessId); QueueTDSEvent(item);
     }
+}
+
+void ThreadNotifyRoutine(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
+    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
+    if (!item) return;
+    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER));
+    PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+    header->Type = Create ? TDSEventThreadCreate : TDSEventHandleOp;
+    header->ProcessId = HandleToUlong(ProcessId);
+    header->ThreadId = HandleToUlong(ThreadId);
+    KeQuerySystemTimePrecise(&header->Timestamp);
+    QueueTDSEvent(item);
+}
+
+void LoadImageNotifyRoutine(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo) {
+    if (!FullImageName || !FullImageName->Buffer || !ImageInfo) return;
+    const ULONG available = MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER) - sizeof(TDS_IMAGE_LOAD_DATA) - sizeof(wchar_t);
+    const USHORT pathBytes = (USHORT)min((ULONG)FullImageName->Length, available);
+    PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
+    if (!item) return;
+    RtlZeroMemory(item, sizeof(EVENT_ITEM) + sizeof(TDS_EVENT_HEADER) + sizeof(TDS_IMAGE_LOAD_DATA) + pathBytes + sizeof(wchar_t));
+    PTDS_EVENT_HEADER header = (PTDS_EVENT_HEADER)(item + 1);
+    PTDS_IMAGE_LOAD_DATA data = (PTDS_IMAGE_LOAD_DATA)(header + 1);
+    header->Type = TDSEventImageLoad;
+    header->ProcessId = HandleToUlong(ProcessId);
+    header->DataSize = sizeof(TDS_IMAGE_LOAD_DATA) + pathBytes + sizeof(wchar_t);
+    KeQuerySystemTimePrecise(&header->Timestamp);
+    data->LoadAddress = (ULONG64)(ULONG_PTR)ImageInfo->ImageBase;
+    data->ImageSize = ImageInfo->ImageSize;
+    data->ImagePathOffset = sizeof(TDS_IMAGE_LOAD_DATA);
+    RtlCopyMemory((PUCHAR)data + data->ImagePathOffset, FullImageName->Buffer, pathBytes);
+    QueueTDSEvent(item);
 }
