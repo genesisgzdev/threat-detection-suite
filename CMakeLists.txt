@@ -81,6 +81,8 @@ set_target_properties(TDSService TDSBridge PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set_target_properties(TDSCore PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_custom_target(TDSDriverBuild
     COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File

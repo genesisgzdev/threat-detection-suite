@@ -33,5 +33,8 @@ for marker in ("PsSetCreateThreadNotifyRoutine", "PsSetLoadImageNotifyRoutine", 
         raise SystemExit(f"driver runtime marker missing: {marker}")
 if "case TDSEventImageLoad" not in service:
     raise SystemExit("image-load decoder missing")
+cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8-sig")
+if "set_target_properties(TDSCore PROPERTIES" not in cmake:
+    raise SystemExit("shared TDSCore runtime library is not pinned")
 
 print("TDS contract checks: ok")
