@@ -49,6 +49,8 @@ if "TDSEventEtwTiApcInjection" not in correlator or "EarlyInitializationPattern"
     raise SystemExit("ETW/APC correlation path missing")
 if "if (event.Type == TDSEventProcessCreate)" not in heuristics or "m_processContexts.erase(event.Pid)" not in heuristics:
     raise SystemExit("heuristic context must reset on a new PID generation")
+if "SaveToDisk() {}" in correlator or "LoadFromDisk() {}" in correlator:
+    raise SystemExit("sequence correlator must not expose empty persistence hooks")
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
 for marker in ("PsSetCreateThreadNotifyRoutine", "PsSetLoadImageNotifyRoutine", "g_DroppedEventCount", "g_EventHighWatermark", "FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT", "data->ImagePathOffset = sizeof(TDS_PROCESS_EVENT_DATA)"):
     if marker not in driver:

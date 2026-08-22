@@ -5,14 +5,6 @@
 
 namespace TDS {
 
-SequenceCorrelator::SequenceCorrelator() {
-    LoadFromDisk();
-}
-
-SequenceCorrelator::~SequenceCorrelator() {
-    SaveToDisk();
-}
-
 void SequenceCorrelator::Analyze(const Event& event) {
     if (event.Type == TDSEventProcessCreate) {
         if (auto data = std::get_if<ProcessEvent>(&event.Data)) {
@@ -59,8 +51,5 @@ void SequenceCorrelator::Analyze(const Event& event) {
         }
     }
 }
-
-void SequenceCorrelator::SaveToDisk() {}
-void SequenceCorrelator::LoadFromDisk() {}
 
 } // namespace TDS

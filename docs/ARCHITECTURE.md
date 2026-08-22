@@ -75,7 +75,7 @@ sequenceDiagram
 
 `observe` queda como política inicial. `contain` y `terminate` solo cambian los flags enviados al driver; no son evidencia de que la contención o terminación haya sido validada en una instalación Windows real.
 
-Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor del proceso objetivo cuando el ABI lo entrega. Las respuestas y el correlador usan `TargetProcessId`; el collector ETW actual solo puede atribuir al emisor cuando el proveedor no entrega un objetivo decodificable. La secuencia de APC antes de la primera imagen o actividad de hilo se marca como inicialización temprana, no como prueba definitiva de Early Bird. El motor de heurísticas borra el contexto anterior al recibir un nuevo evento de creación para que un PID reciclado no herede puntuación.
+Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor del proceso objetivo cuando el ABI lo entrega. Las respuestas y el correlador usan `TargetProcessId`; el collector ETW actual solo puede atribuir al emisor cuando el proveedor no entrega un objetivo decodificable. La secuencia de APC antes de la primera imagen o actividad de hilo se marca como inicialización temprana, no como prueba definitiva de Early Bird. El motor de heurísticas borra el contexto anterior al recibir un nuevo evento de creación para que un PID reciclado no herede puntuación. El estado del correlador vive solo durante el proceso del servicio: no se persiste entre reinicios porque un PID no es una identidad durable.
 
 ## 3. Seguridad de la frontera kernel/user
 

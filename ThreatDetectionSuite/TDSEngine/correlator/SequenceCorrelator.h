@@ -10,15 +10,12 @@ namespace TDS {
 
 class SequenceCorrelator {
 public:
-    SequenceCorrelator();
-    ~SequenceCorrelator();
+    SequenceCorrelator() = default;
+    ~SequenceCorrelator() = default;
 
     void Analyze(const Event& event);
 
 private:
-    void SaveToDisk();
-    void LoadFromDisk();
-
     struct ProcessContext {
         uint32_t Pid;
         bool Suspended;
@@ -27,7 +24,6 @@ private:
     };
 
     std::map<uint32_t, ProcessContext> m_processStates;
-    const std::string m_persistenceFile = "tds_correlator.db"; 
 };
 
 } // namespace TDS
