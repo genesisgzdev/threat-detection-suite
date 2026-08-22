@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [5.6.7] - 2026-08-22
 
 ### Security and runtime hardening
 
@@ -12,6 +12,15 @@
 - Made response enforcement observe-first with explicit `contain` and `terminate` modes.
 - Added local log rotation, optional forensics, OTLP/HTTP export and Windows service recovery tooling.
 - Added Windows user-mode CI, shared-contract checks, WDK project metadata and WiX packaging inputs.
+- Replaced the invalid GitHub Mermaid subgraph syntax with explicit renderer-safe identifiers.
+- Moved the security workflow to CodeQL v4 with an explicit manual build mode and immutable action pin.
+
+### Riesgo y actualización
+
+- No cambia el ABI ni el driver; el cambio de CodeQL afecta únicamente la auditoría CI.
+- La compilación nativa y los checks de contrato siguen siendo gates separados de la validación del driver cargado.
+
+## [Unreleased]
 - Attributed remote-thread, APC and ETW-TI responses to the decoded target PID instead of the telemetry emitter.
 - Correlated ETW/APC signals during process initialization; the repository does not label this Early Bird proof until native ground-truth validation exists.
 - Registered the declared Registry callback, separated read/write IOCTL access bits and removed the duplicate WFP classify guard.
