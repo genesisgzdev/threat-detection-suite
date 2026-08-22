@@ -6,8 +6,15 @@
 namespace TDS {
 
 void HeuristicsEngine::ProcessEvent(const Event& event) {
-    auto& ctx = m_processContexts[event.Pid];
-    ctx.Pid = event.Pid;
+    uint32_t attributedPid = event.Pid;
+    if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection ||
+        event.Type == TDSEventEtwTiApcInjection) {
+        if (const auto* injection = std::get_if<RemoteThreadEvent>(&event.Data)) {
+            attributedPid = injection->TargetPid;
+        }
+    }
+    auto& ctx = m_processContexts[attributedPid];
+    ctx.Pid = attributedPid;
     ctx.LastActivity = std::chrono::steady_clock::now();
 
     switch (event.Type) {
@@ -18,6 +25,8 @@ void HeuristicsEngine::ProcessEvent(const Event& event) {
             break;
 
         case TDSEventRemoteThread:
+        case TDSEventApcInjection:
+        case TDSEventEtwTiApcInjection:
             ctx.Score += 40;
             ctx.HasRemoteThreadActivity = true;
             break;
@@ -40,7 +49,7 @@ void HeuristicsEngine::ProcessEvent(const Event& event) {
             return;
     }
 
-    EvaluateRisk(event.Pid);
+    EvaluateRisk(attributedPid);
 }
 
 void HeuristicsEngine::EvaluateRisk(uint32_t pid) {
