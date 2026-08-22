@@ -6,6 +6,12 @@
 namespace TDS {
 
 void HeuristicsEngine::ProcessEvent(const Event& event) {
+    // A PID can be reused after a process exits. A fresh create event starts
+    // a new behavioral generation and must not inherit the old score/context
+    // if the terminate event was dropped from the bounded queue.
+    if (event.Type == TDSEventProcessCreate) {
+        m_processContexts.erase(event.Pid);
+    }
     uint32_t attributedPid = event.Pid;
     if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection ||
         event.Type == TDSEventEtwTiApcInjection) {

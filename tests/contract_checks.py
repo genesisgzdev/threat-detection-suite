@@ -13,6 +13,7 @@ driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encodin
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
 engine = (ROOT / "ThreatDetectionSuite/TDSEngine/TDSEngine.cpp").read_text(encoding="utf-8-sig")
 correlator = (ROOT / "ThreatDetectionSuite/TDSEngine/correlator/SequenceCorrelator.cpp").read_text(encoding="utf-8-sig")
+heuristics = (ROOT / "ThreatDetectionSuite/TDSEngine/HeuristicsEngine.cpp").read_text(encoding="utf-8-sig")
 
 enum_block = re.search(r"typedef enum _TDS_EVENT_TYPE \{(.*?)\} TDS_EVENT_TYPE;", common, re.S)
 if not enum_block:
@@ -46,6 +47,8 @@ if "const uint32_t targetPid = data->TargetPid" not in engine:
     raise SystemExit("injection response must target the decoded target PID")
 if "TDSEventEtwTiApcInjection" not in correlator or "EarlyInitializationPattern" not in correlator:
     raise SystemExit("ETW/APC correlation path missing")
+if "if (event.Type == TDSEventProcessCreate)" not in heuristics or "m_processContexts.erase(event.Pid)" not in heuristics:
+    raise SystemExit("heuristic context must reset on a new PID generation")
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
 for marker in ("PsSetCreateThreadNotifyRoutine", "PsSetLoadImageNotifyRoutine", "g_DroppedEventCount", "g_EventHighWatermark", "FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT", "data->ImagePathOffset = sizeof(TDS_PROCESS_EVENT_DATA)"):
     if marker not in driver:
