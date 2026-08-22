@@ -222,13 +222,13 @@ void QueueTDSEvent(PEVENT_ITEM item) {
 
 void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_INCOMING_METADATA_VALUES0* inMetaValues, void* layerData, const void* classifyContext, const FWPS_FILTER0* filter, UINT64 flowContext, FWPS_CLASSIFY_OUT0* classifyOut) {
     UNREFERENCED_PARAMETER(layerData); UNREFERENCED_PARAMETER(classifyContext); UNREFERENCED_PARAMETER(filter); UNREFERENCED_PARAMETER(flowContext);
+    if (classifyOut) classifyOut->actionType = FWP_ACTION_PERMIT;
     if (!inFixedValues || !inMetaValues || !classifyOut || !inFixedValues->incomingValue) return;
     TDS_PROTECTION_POLICY policy;
     KIRQL oldIrql;
     KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
     policy = g_Policy;
     KeReleaseSpinLock(&g_PolicyLock, oldIrql);
-    classifyOut->actionType = FWP_ACTION_PERMIT;
     if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_WFP) == 0) return;
     if (inMetaValues->currentMetadataValues & FWPS_METADATA_FIELD_PROCESS_ID) {
         ULONG pid = (ULONG)inMetaValues->processId;

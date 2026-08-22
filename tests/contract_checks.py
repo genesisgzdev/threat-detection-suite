@@ -36,6 +36,8 @@ if "TDS_POLICY_FLAG_ENABLE_WFP" not in service or "TDS_POLICY_FLAG_ENABLE_MINIFI
     raise SystemExit("service must explicitly enable the registered telemetry callbacks")
 if "if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_WFP) == 0) return;" not in driver:
     raise SystemExit("WFP callback ignores its runtime enable flag")
+if "if (classifyOut) classifyOut->actionType = FWP_ACTION_PERMIT;" not in driver:
+    raise SystemExit("WFP callback must default to permit before validating telemetry inputs")
 if "if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_MINIFILTER) == 0) return FLT_PREOP_SUCCESS_NO_CALLBACK;" not in driver:
     raise SystemExit("minifilter callback ignores its runtime enable flag")
 for marker in ("network->Ipv4Address = remoteAddress->uint32", "network->RemotePort = remotePort->uint16", "network->Protocol = protocol->uint8"):

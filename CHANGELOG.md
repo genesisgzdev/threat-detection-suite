@@ -41,6 +41,7 @@
 - Self-protection now uses the service PID captured through the policy IOCTL instead of an executable name.
 - Minifilter ransomware events now use the filesystem requestor process rather than the callback worker process; the contract check prevents this attribution from regressing.
 - El modo `terminate` mantiene la escalera `contain >=85` y `terminate >=95`; el umbral heurístico de 70 solo genera una alerta candidata y no implica terminación.
+- WFP inicializa una decisión `PERMIT` antes de validar campos opcionales, evitando que una entrada incompleta deje la acción sin definir.
 
 All notable changes to the Threat Detection Suite (TDS) project will be documented in this file.
 
