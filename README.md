@@ -64,7 +64,7 @@ El `EventBus` de user-mode mantiene una segunda cola acotada para el análisis. 
 
 ### 4. Process Tamper Protection
 Protection of critical processes (such as LSASS and the TDS user-mode service) is implemented via `ObRegisterCallbacks`.
-- **Identity**: the service PID is captured from the process that successfully sets the policy through the device IOCTL. LSASS still uses `PsGetProcessSignatureLevel()` and a system path check. The service path is not used as an authorization primitive.
+- **Identity**: the driver retains a referenced `PEPROCESS` for the process that successfully sets the policy through the device IOCTL and clears it on process termination. LSASS still uses `PsGetProcessSignatureLevel()` and a system path check. A PID or executable path is not used as an identity primitive.
 - **Access Stripping**: Handles requesting `PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `PROCESS_SUSPEND_RESUME`, or `PROCESS_CREATE_THREAD` against protected PIDs have those flags stripped from their `DesiredAccess` mask by the kernel.
 
 ### 5. Minifilter Reentrancy Prevention

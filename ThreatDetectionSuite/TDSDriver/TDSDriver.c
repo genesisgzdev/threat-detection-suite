@@ -18,7 +18,7 @@ DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) SLIST_HEADER g_EventQueueHead;
 
 PVOID g_ObRegistrationHandle = NULL;
 LARGE_INTEGER g_RegistryCookie = {0};
-ULONG g_ServicePid = 0; 
+PEPROCESS g_ServiceProcess = NULL;
 BOOLEAN g_MonitoringActive = FALSE;
 TDS_PROTECTION_POLICY g_Policy = { 1, sizeof(TDS_PROTECTION_POLICY), TDS_POLICY_FLAG_PROTECT_SERVICE, 1, 0, 0, {0, 0, 0} };
 KSPIN_LOCK g_PolicyLock;
@@ -131,10 +131,15 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
             requested->Reserved[1] != 0 || requested->Reserved[2] != 0) {
             return CompleteIrp(Irp, STATUS_REVISION_MISMATCH, 0);
         }
+        PEPROCESS caller = IoGetRequestorProcess(Irp);
+        if (!caller) return CompleteIrp(Irp, STATUS_ACCESS_DENIED, 0);
+        ObReferenceObject(caller);
+        PEPROCESS previous = (PEPROCESS)InterlockedExchangePointer((PVOID volatile *)&g_ServiceProcess, caller);
+        if (previous) ObDereferenceObject(previous);
+
         KIRQL oldIrql;
         KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
         g_Policy = *requested;
-        g_ServicePid = HandleToUlong(IoGetRequestorProcessId(Irp));
         g_MonitoringActive = requested->ObserveOnly ? FALSE : TRUE;
         KeReleaseSpinLock(&g_PolicyLock, oldIrql);
         return CompleteIrp(Irp, STATUS_SUCCESS, 0);
@@ -185,7 +190,8 @@ PVOID GetProcessPeb(PEPROCESS Process) {
 }
 
 BOOLEAN IsServiceProcess(PEPROCESS Process) {
-    return g_ServicePid != 0 && HandleToUlong(PsGetProcessId(Process)) == g_ServicePid;
+    return Process != NULL && Process == (PEPROCESS)InterlockedCompareExchangePointer(
+        (PVOID volatile *)&g_ServiceProcess, NULL, NULL);
 }
 
 BOOLEAN IsLsass(PEPROCESS Process) {
@@ -299,8 +305,7 @@ OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERA
     if (OperationInformation->ObjectType == *PsProcessType) targetProcess = (PEPROCESS)OperationInformation->Object;
     else if (OperationInformation->ObjectType == *PsThreadType) targetProcess = IoThreadToProcess((PETHREAD)OperationInformation->Object);
     if (!targetProcess) return OB_PREOP_SUCCESS;
-    ULONG targetPid = HandleToUlong(PsGetProcessId(targetProcess));
-    if (g_ServicePid != 0 && targetPid == g_ServicePid) {
+    if (IsServiceProcess(targetProcess)) {
         ACCESS_MASK forbidden = (OperationInformation->ObjectType == *PsProcessType) ? (PROCESS_TERMINATE | PROCESS_VM_WRITE | PROCESS_SUSPEND_RESUME | PROCESS_CREATE_THREAD) : (THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT);
         if (OperationInformation->Operation == OB_OPERATION_HANDLE_CREATE) OperationInformation->Parameters->CreateHandleInformation.DesiredAccess &= ~forbidden;
         else OperationInformation->Parameters->DuplicateHandleInformation.DesiredAccess &= ~forbidden;
@@ -415,6 +420,8 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
     PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutineEx, TRUE);
     if (g_ImageNotifyRegistered) { PsRemoveLoadImageNotifyRoutine(LoadImageNotifyRoutine); g_ImageNotifyRegistered = FALSE; }
     if (g_ThreadNotifyRegistered) { PsRemoveCreateThreadNotifyRoutine(ThreadNotifyRoutine); g_ThreadNotifyRegistered = FALSE; }
+    PEPROCESS serviceProcess = (PEPROCESS)InterlockedExchangePointer((PVOID volatile *)&g_ServiceProcess, NULL);
+    if (serviceProcess) ObDereferenceObject(serviceProcess);
     PSLIST_ENTRY entry;
     while ((entry = InterlockedPopEntrySList(&g_EventQueueHead)) != NULL) {
         PEVENT_ITEM item = CONTAINING_RECORD(entry, EVENT_ITEM, ListEntry);
@@ -425,7 +432,11 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
 }
 
 void ProcessNotifyRoutineEx(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo) {
-    UNREFERENCED_PARAMETER(Process);
+    if (!CreateInfo && IsServiceProcess(Process)) {
+        PEPROCESS previous = (PEPROCESS)InterlockedCompareExchangePointer(
+            (PVOID volatile *)&g_ServiceProcess, NULL, Process);
+        if (previous == Process) ObDereferenceObject(Process);
+    }
     PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
     if (item) {
         const ULONG maxData = MAX_EVENT_BUFFER_SIZE - sizeof(TDS_EVENT_HEADER);
