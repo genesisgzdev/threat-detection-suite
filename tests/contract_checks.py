@@ -61,6 +61,8 @@ if "if (event.Type == TDSEventProcessCreate)" not in heuristics or "m_processCon
     raise SystemExit("heuristic context must reset on a new PID generation")
 if "IsServiceProcess(targetProcess) || IsLsass(targetProcess)" not in driver:
     raise SystemExit("LSASS protection helper is not wired into the object callback")
+if 'if (mode == "terminate") return {ResponseMode::Terminate, 85, 95};' not in (ROOT / "ThreatDetectionSuite/TDSEngine/ResponsePolicy.h").read_text(encoding="utf-8-sig"):
+    raise SystemExit("terminate response thresholds must preserve contain-before-terminate ordering")
 minifilter = driver[driver.index("FLT_PREOP_CALLBACK_STATUS TDSPreWriteCallback"):driver.index("CONST FLT_OPERATION_REGISTRATION Callbacks")]
 if "FltGetRequestorProcess(Data)" not in minifilter or "PsGetProcessId(req)" not in minifilter:
     raise SystemExit("minifilter events must use the I/O requestor process identity")

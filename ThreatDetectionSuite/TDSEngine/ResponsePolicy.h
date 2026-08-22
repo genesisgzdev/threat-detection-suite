@@ -18,7 +18,7 @@ public:
         const char* raw = std::getenv("TDS_RESPONSE_MODE");
         if (!raw) return {};
         std::string mode(raw);
-        if (mode == "terminate") return {ResponseMode::Terminate, 95, 90};
+        if (mode == "terminate") return {ResponseMode::Terminate, 85, 95};
         if (mode == "contain") return {ResponseMode::Contain, 85, 100};
         if (mode == "alert") return {ResponseMode::Alert, 70, 100};
         return {};

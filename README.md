@@ -36,7 +36,8 @@ graph TD
         Svc -->|ETW-Ti Session| ETW[EtwCollector]
         Svc -->|MEM_PRIVATE Scan| YARA["MemoryScanner / libyara"]
         Svc -->|Shannon Entropy| Heuristics[HeuristicsEngine]
-        Heuristics -->|Risk threshold 70| IPS[IPSManager]
+        Heuristics -->|score 70: alert candidate| RP[ResponsePolicy]
+        RP -->|contain >=85 or terminate >=95| IPS[IPSManager]
         IPS -->|NtTerminateProcess| Threat[Malicious Process]
         Heuristics -->|Log Event| Log[tds_threat_events.jsonl]
     end
