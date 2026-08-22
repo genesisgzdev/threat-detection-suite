@@ -23,6 +23,12 @@ jobs:
         run: cmake --build build --config Release --parallel
       - uses: github/codeql-action/analyze@v3
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = '8.24.3'
+          $archive = Join-Path $env:RUNNER_TEMP "gitleaks-$version.zip"
+          $install = Join-Path $env:RUNNER_TEMP "gitleaks-$version"
+          $url = "https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_windows_x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $install -Force
+          & (Join-Path $install 'gitleaks.exe') detect --source . --redact --exit-code 1 --no-banner
