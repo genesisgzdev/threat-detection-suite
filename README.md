@@ -60,6 +60,8 @@ Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ranso
 ### 3. IOCTL boundary and queue pressure
 Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites antes de copiar datos. La política se autoriza por el ACL del device seguro y por el access bit del IOCTL; el driver no confía en el nombre o la ruta del ejecutable solicitante. `IOCTL_TDS_GET_QUEUE_STATS` expone profundidad y eventos descartados; cuando la cola llega a `EVENT_QUEUE_LIMIT`, el driver descarta el evento y aumenta el contador en vez de crecer sin límite. La fuzzing de IRP, Driver Verifier y las pruebas de unload siguen siendo validación nativa pendiente.
 
+`TDS_POLICY_FLAG_PROTECT_SERVICE` controla el filtrado de handles contra el proceso del servicio y sus hilos. La protección no se activa por el mero hecho de abrir el device; el callback toma una copia de la política vigente antes de decidir.
+
 El `EventBus` de user-mode mantiene una segunda cola acotada para el análisis. Sus métricas separan profundidad actual, máximo observado, descartados totales y descartados por tipo de evento. Un descarte en cualquiera de las dos colas significa telemetría incompleta; no se interpreta como ausencia de actividad.
 
 ### 4. Process Tamper Protection
