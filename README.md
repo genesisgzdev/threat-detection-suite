@@ -49,7 +49,7 @@ graph TD;
 ## Core Implementation Details
 
 ### 1. Windows Filtering Platform (WFP)
-El driver registra hoy un sublayer dinámico y un callout en `FWPS_LAYER_ALE_AUTH_CONNECT_V4`. El callback observa conexiones IPv4 y, cuando la política permite containment, bloquea el caso implementado para tráfico remoto al puerto 53 con tamaño superior a 512 bytes. No se debe leer este código como cobertura IPv6 o de `DATAGRAM_DATA`: esas capas no están registradas en el camino actual.
+El driver registra hoy un sublayer dinámico y un callout en `FWPS_LAYER_ALE_AUTH_CONNECT_V4`. El callback observa conexiones IPv4 y copia al evento la dirección remota, el puerto y el protocolo después de validar los índices y tipos del layer. Cuando la política permite containment, bloquea el caso implementado para tráfico remoto al puerto 53 con tamaño superior a 512 bytes. No se debe leer este código como cobertura IPv6 o de `DATAGRAM_DATA`: esas capas no están registradas en el camino actual.
 
 ### 2. Lock-Free Telemetry Queuing
 Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ransomware encrypting a drive) causes severe processor contention.
