@@ -22,6 +22,7 @@
 
 ## [Unreleased]
 
+- Retira GUIDs y handles de WFP IPv6 y `DATAGRAM_DATA` que no tenían registro ni camino de cleanup; el driver deja declarada solo la cobertura ALE IPv4 que realmente instala.
 - Corrige la ruta de fallo de carga del minifilter para desregistrar también las callbacks de imagen e hilo antes de descargar el driver.
 - La respuesta user-mode suprime containment/termination para procesos protegidos y del sistema como barrera adicional contra false positives.
 - El callback de protección conecta la verificación de LSASS además de la identidad `PEPROCESS` del servicio.
