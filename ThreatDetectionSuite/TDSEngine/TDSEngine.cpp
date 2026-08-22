@@ -93,15 +93,18 @@ void TDSEngine::EvaluateThreat(const Event& event) {
             }
             break;
         }
-        case TDSEventRemoteThread: {
+        case TDSEventRemoteThread:
+        case TDSEventApcInjection:
+        case TDSEventEtwTiApcInjection: {
             if (auto data = std::get_if<RemoteThreadEvent>(&event.Data)) {
-                Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Remote thread injection detected", "Target PID: " + std::to_string(data->TargetPid), event.Pid);
+                const uint32_t targetPid = data->TargetPid;
+                Logger::Instance().LogThreat(TDS_SEVERITY_HIGH, CAT_DLL_INJECTION, "Injection telemetry observed", "Target PID: " + std::to_string(targetPid), targetPid);
                 
                 if (m_responsePolicy.AllowsTermination(95)) {
-                    IPSManager::ContainProcess(event.Pid);
-                    IPSManager::TerminateMaliciousProcess(event.Pid);
+                    IPSManager::ContainProcess(targetPid);
+                    IPSManager::TerminateMaliciousProcess(targetPid);
                 } else if (m_responsePolicy.AllowsContainment(95)) {
-                    IPSManager::ContainProcess(event.Pid);
+                    IPSManager::ContainProcess(targetPid);
                 }
             }
             break;

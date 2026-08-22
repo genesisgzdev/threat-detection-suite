@@ -26,20 +26,26 @@ void SequenceCorrelator::Analyze(const Event& event) {
         return;
     }
 
-    // APC and Early Bird injection detection logic
-    if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection) {
-        auto it = m_processStates.find(event.Pid);
+    // Correlate against the target process, not the process that emitted the
+    // telemetry. ETW and remote-thread records can have different source and
+    // target PIDs.
+    if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection ||
+        event.Type == TDSEventEtwTiApcInjection) {
+        const auto* injection = std::get_if<RemoteThreadEvent>(&event.Data);
+        const uint32_t targetPid = injection ? injection->TargetPid : event.Pid;
+        auto it = m_processStates.find(targetPid);
         if (it != m_processStates.end()) {
             ProcessContext& ctx = it->second;
-            
-            // If process is still initializing and receives an APC/Remote Thread
-            if (ctx.Suspended && !ctx.Initialized) {
+
+            // The current contract does not expose a reliable suspended flag.
+            // Use observable ordering until native ETW ground truth exists.
+            if (!ctx.Initialized) {
                 Logger::Instance().LogThreat(
                     TDS_SEVERITY_CRITICAL, 
                     CAT_DLL_INJECTION,
-                    "Early Bird Injection detected: Remote code execution before process initialization",
-                    "EarlyBirdPattern",
-                    event.Pid
+                    "APC or remote-thread activity during process initialization",
+                    "EarlyInitializationPattern",
+                    targetPid
                 );
             }
         }

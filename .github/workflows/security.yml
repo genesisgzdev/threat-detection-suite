@@ -23,7 +23,7 @@ jobs:
         run: cmake -S . -B build -A x64 -DTDS_ENABLE_YARA=OFF
       - name: Build user-mode code for CodeQL
         run: cmake --build build --config Release --parallel
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
       - name: Secret scan
         shell: pwsh
         run: |
