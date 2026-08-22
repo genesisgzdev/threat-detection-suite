@@ -17,11 +17,13 @@ $service = Get-Content (Join-Path $root 'ThreatDetectionSuite\TDSEngine\TDSServi
     if ($driver -notmatch [regex]::Escape($_)) { throw "Missing driver security contract: $_" }
 }
 
-if ($common -notmatch 'IOCTL_TDS_SET_PROTECTION_POLICY[^\r\n]*FILE_ANY_ACCESS') {
-    throw 'Policy IOCTL ABI access bits changed'
+if ($common -notmatch 'IOCTL_TDS_SET_PROTECTION_POLICY[^\r\n]*FILE_WRITE_ACCESS' -or
+    $common -notmatch 'IOCTL_TDS_SET_RUNTIME_POLICY[^\r\n]*FILE_WRITE_ACCESS') {
+    throw 'Policy IOCTL ABI is not write-protected'
 }
-if ($common -notmatch 'IOCTL_TDS_GET_NEXT_EVENT[^\r\n]*FILE_ANY_ACCESS') {
-    throw 'Event IOCTL ABI access bits changed'
+if ($common -notmatch 'IOCTL_TDS_GET_NEXT_EVENT[^\r\n]*FILE_READ_ACCESS' -or
+    $common -notmatch 'IOCTL_TDS_GET_QUEUE_STATS[^\r\n]*FILE_READ_ACCESS') {
+    throw 'Event IOCTL ABI is not read-protected'
 }
 if ($service -notmatch 'OpenDriverWithPolicy' -or $service -notmatch 'ApplyProtectionPolicy') {
     throw 'Service reconnect path does not reapply policy'
