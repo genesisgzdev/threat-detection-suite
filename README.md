@@ -28,6 +28,7 @@ graph TD
         OB[ObRegisterCallbacks] --> |Process Handle Req| EL;
         EL --> |InterlockedPushEntrySList| SList[Lock-Free SList Queue];
         IOCTL[IOCTL_TDS_GET_NEXT_EVENT] --> |InterlockedPopEntrySList| SList;
+        STATS[IOCTL_TDS_GET_QUEUE_STATS] --> |depth high-watermark drops| SList;
     end
 
     subgraph USER["Ring 3 - User Mode"]
@@ -54,7 +55,7 @@ El driver registra hoy un sublayer dinámico y un callout en `FWPS_LAYER_ALE_AUT
 ### 2. Lock-Free Telemetry Queuing
 Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ransomware encrypting a drive) causes severe processor contention.
 - **Memory Allocation**: The driver initializes an `NPAGED_LOOKASIDE_LIST` during `DriverEntry`. High-frequency callbacks allocate event buffers from this pool, guaranteeing constant-time, fragmentation-free allocation.
-- **Queueing**: Events are pushed to an `SLIST_HEADER` using `InterlockedPushEntrySList`. The user-mode service retrieves them via `IOCTL_TDS_GET_NEXT_EVENT` using `InterlockedPopEntrySList`. This completely eliminates spinning waits.
+- **Queueing**: Events are pushed to an `SLIST_HEADER` using `InterlockedPushEntrySList`. The user-mode service retrieves them via `IOCTL_TDS_GET_NEXT_EVENT` using `InterlockedPopEntrySList`. `IOCTL_TDS_GET_QUEUE_STATS` exposes current depth, high-water mark and cumulative drops so a bounded queue cannot lose evidence silently. This does not recover dropped events; it makes loss observable.
 
 ### 3. IOCTL boundary and queue pressure
 Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites antes de copiar datos. La política se autoriza por el ACL del device seguro y por el access bit del IOCTL; el driver no confía en el nombre o la ruta del ejecutable solicitante. `IOCTL_TDS_GET_QUEUE_STATS` expone profundidad y eventos descartados; cuando la cola llega a `EVENT_QUEUE_LIMIT`, el driver descarta el evento y aumenta el contador en vez de crecer sin límite. La fuzzing de IRP, Driver Verifier y las pruebas de unload siguen siendo validación nativa pendiente.

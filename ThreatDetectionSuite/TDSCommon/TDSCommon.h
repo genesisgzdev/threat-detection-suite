@@ -22,6 +22,7 @@ typedef struct _TDS_QUEUE_STATS {
     ULONG Size;
     ULONG QueueDepth;
     ULONG DroppedEvents;
+    ULONG HighWatermark;
 } TDS_QUEUE_STATS, *PTDS_QUEUE_STATS;
 
 typedef enum _TDS_EVENT_TYPE {

@@ -24,6 +24,7 @@ TDS_PROTECTION_POLICY g_Policy = { 1, sizeof(TDS_PROTECTION_POLICY), TDS_POLICY_
 KSPIN_LOCK g_PolicyLock;
 volatile LONG g_EventCount = 0;
 volatile LONG g_DroppedEventCount = 0;
+volatile LONG g_EventHighWatermark = 0;
 BOOLEAN g_ThreadNotifyRegistered = FALSE;
 BOOLEAN g_ImageNotifyRegistered = FALSE;
 BOOLEAN g_RegistryCallbackRegistered = FALSE;
@@ -108,7 +109,7 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     NTSTATUS accessStatus = STATUS_SUCCESS;
     if (code == IOCTL_TDS_SET_PROTECTION_POLICY || code == IOCTL_TDS_SET_RUNTIME_POLICY) {
         accessStatus = IoValidateDeviceIoControlAccess(Irp, FILE_WRITE_ACCESS);
-    } else if (code == IOCTL_TDS_GET_NEXT_EVENT) {
+    } else if (code == IOCTL_TDS_GET_NEXT_EVENT || code == IOCTL_TDS_GET_QUEUE_STATS) {
         accessStatus = IoValidateDeviceIoControlAccess(Irp, FILE_READ_ACCESS);
     }
     if (!NT_SUCCESS(accessStatus)) {
@@ -170,6 +171,7 @@ NTSTATUS TDSDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
         stats->Size = sizeof(*stats);
         stats->QueueDepth = (ULONG)max(0, InterlockedCompareExchange(&g_EventCount, 0, 0));
         stats->DroppedEvents = (ULONG)max(0, InterlockedCompareExchange(&g_DroppedEventCount, 0, 0));
+        stats->HighWatermark = (ULONG)max(0, InterlockedCompareExchange(&g_EventHighWatermark, 0, 0));
         return CompleteIrp(Irp, STATUS_SUCCESS, sizeof(*stats));
     }
 
@@ -200,11 +202,18 @@ BOOLEAN IsLsass(PEPROCESS Process) {
 }
 
 void QueueTDSEvent(PEVENT_ITEM item) {
-    if (InterlockedIncrement(&g_EventCount) > EVENT_QUEUE_LIMIT) {
+    LONG count = InterlockedIncrement(&g_EventCount);
+    if (count > EVENT_QUEUE_LIMIT) {
         InterlockedDecrement(&g_EventCount);
         InterlockedIncrement(&g_DroppedEventCount);
         ExFreeToNpagedLookasideList(&g_EventLookasideList, item);
         return;
+    }
+    LONG highWatermark = InterlockedCompareExchange(&g_EventHighWatermark, 0, 0);
+    while (count > highWatermark) {
+        LONG observed = InterlockedCompareExchange(&g_EventHighWatermark, count, highWatermark);
+        if (observed == highWatermark || observed >= count) break;
+        highWatermark = observed;
     }
     InterlockedPushEntrySList(&g_EventQueueHead, &item->ListEntry);
 }

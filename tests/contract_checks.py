@@ -47,7 +47,7 @@ if "const uint32_t targetPid = data->TargetPid" not in engine:
 if "TDSEventEtwTiApcInjection" not in correlator or "EarlyInitializationPattern" not in correlator:
     raise SystemExit("ETW/APC correlation path missing")
 driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
-for marker in ("PsSetCreateThreadNotifyRoutine", "PsSetLoadImageNotifyRoutine", "g_DroppedEventCount", "FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT", "data->ImagePathOffset = sizeof(TDS_PROCESS_EVENT_DATA)"):
+for marker in ("PsSetCreateThreadNotifyRoutine", "PsSetLoadImageNotifyRoutine", "g_DroppedEventCount", "g_EventHighWatermark", "FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT", "data->ImagePathOffset = sizeof(TDS_PROCESS_EVENT_DATA)"):
     if marker not in driver:
         raise SystemExit(f"driver runtime marker missing: {marker}")
 if "case TDSEventImageLoad" not in service:
@@ -73,5 +73,8 @@ if "code == IOCTL_TDS_SET_PROTECTION_POLICY || code == IOCTL_TDS_SET_RUNTIME_POL
     raise SystemExit("runtime policy IOCTL is declared but not handled")
 if "OpenDriverWithPolicy" not in service or "ApplyProtectionPolicy" not in service:
     raise SystemExit("service reconnect policy reapplication missing")
+for marker in ("TDS_QUEUE_STATS", "HighWatermark", "DroppedEvents"):
+    if marker not in common + service:
+        raise SystemExit(f"queue observability contract missing: {marker}")
 
 print("TDS contract checks: ok")
