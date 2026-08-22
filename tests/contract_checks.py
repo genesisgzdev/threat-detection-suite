@@ -37,4 +37,20 @@ cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8-sig")
 if "set_target_properties(TDSCore PROPERTIES" not in cmake:
     raise SystemExit("shared TDSCore runtime library is not pinned")
 
+driver = (ROOT / "ThreatDetectionSuite/TDSDriver/TDSDriver.c").read_text(encoding="utf-8-sig")
+if "IOCTL_TDS_SET_RUNTIME_POLICY" not in common or "IOCTL_TDS_SET_RUNTIME_POLICY" not in driver:
+    raise SystemExit("runtime policy IOCTL contract missing")
+if "IoValidateDeviceIoControlAccess(Irp, FILE_WRITE_ACCESS)" not in driver or "IoValidateDeviceIoControlAccess(Irp, FILE_READ_ACCESS)" not in driver:
+    raise SystemExit("explicit policy/event IOCTL access validation missing")
+if "FILE_ANY_ACCESS" not in common:
+    raise SystemExit("shared IOCTL ABI unexpectedly changed")
+if "IoCreateDeviceSecure" not in driver:
+    raise SystemExit("driver device ACL is not enforced")
+if "IsAuthorizedPolicyCaller" not in driver:
+    raise SystemExit("policy caller authorization check missing")
+if "code == IOCTL_TDS_SET_PROTECTION_POLICY || code == IOCTL_TDS_SET_RUNTIME_POLICY" not in driver:
+    raise SystemExit("runtime policy IOCTL is declared but not handled")
+if "OpenDriverWithPolicy" not in service or "ApplyProtectionPolicy" not in service:
+    raise SystemExit("service reconnect policy reapplication missing")
+
 print("TDS contract checks: ok")

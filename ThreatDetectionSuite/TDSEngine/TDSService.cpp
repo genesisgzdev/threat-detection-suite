@@ -13,10 +13,7 @@
 #include "TDSEngine.h"
 #include "collectors/EtwCollector.h"
 
-//
-// Threat Detection Suite v5.0.0 - Native Windows Service
-// Cloud Integration & Advanced Kernel Watchdog
-//
+// Threat Detection Suite v5.6.6 - Native Windows Service
 
 SERVICE_STATUS        g_ServiceStatus = {0};
 SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
@@ -172,18 +169,23 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode) {
     }
 }
 
-class CloudTelemetryBridge {
-public:
-    /**
-     * Dispatches telemetry to Google SecOps (UDM Format).
-     */
-    static void Dispatch(const TDS::Event& event) {
-        UNREFERENCED_PARAMETER(event);
-        // Here we would use the mcp_google-secops_ingest_udm_events tool
-        // or a direct REST API call.
-        // Format: UDM standard mapping for 2026.
+static bool ApplyProtectionPolicy(HANDLE hDevice, const TDS_PROTECTION_POLICY& policy) {
+    DWORD bytesReturned = 0;
+    return DeviceIoControl(hDevice, IOCTL_TDS_SET_PROTECTION_POLICY,
+                           const_cast<TDS_PROTECTION_POLICY*>(&policy), sizeof(policy),
+                           NULL, 0, &bytesReturned, NULL) != FALSE;
+}
+
+static HANDLE OpenDriverWithPolicy(const TDS_PROTECTION_POLICY& policy) {
+    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Link", GENERIC_READ | GENERIC_WRITE,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (hDevice == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
+    if (!ApplyProtectionPolicy(hDevice, policy)) {
+        CloseHandle(hDevice);
+        return INVALID_HANDLE_VALUE;
     }
-};
+    return hDevice;
+}
 
 DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     UNREFERENCED_PARAMETER(lpParam);
@@ -192,10 +194,6 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     TDS::EtwCollector etw([&engine](const TDS::Event& event) { engine.PushEvent(event); });
     etw.Start();
 
-    // The service now informs the driver of its PID for self-protection
-    HANDLE hDevice = CreateFileW(L"\\\\.\\TDS_Core_Link", GENERIC_READ | GENERIC_WRITE,
-                                FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-    
     TDS_PROTECTION_POLICY policy = {};
     policy.Version = 1;
     policy.Size = sizeof(policy);
@@ -215,19 +213,19 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
             policy.AllowProcessTermination = 1;
         }
     }
-    if (hDevice != INVALID_HANDLE_VALUE) {
-        DWORD bytes = 0;
-        DeviceIoControl(hDevice, IOCTL_TDS_SET_PROTECTION_POLICY, &policy, sizeof(policy), NULL, 0, &bytes, NULL);
-    }
+    // Opening the driver and applying policy are one operation so reconnects
+    // cannot resume event collection with stale or missing protection.
+    HANDLE hDevice = OpenDriverWithPolicy(policy);
 
     BYTE buffer[MAX_EVENT_BUFFER_SIZE];
     DWORD bytesReturned = 0;
     TDS_QUEUE_STATS queueStats = {};
     while (WaitForSingleObject(g_ServiceStopEvent, 1000) == WAIT_TIMEOUT) {
         if (hDevice == INVALID_HANDLE_VALUE) {
-            hDevice = CreateFileW(L"\\\\.\\TDS_Core_Link", GENERIC_READ | GENERIC_WRITE,
-                                  FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-            Sleep(1000);
+            hDevice = OpenDriverWithPolicy(policy);
+            if (hDevice == INVALID_HANDLE_VALUE) {
+                WaitForSingleObject(g_ServiceStopEvent, 1000);
+            }
             continue;
         }
         if (DeviceIoControl(hDevice, IOCTL_TDS_GET_QUEUE_STATS, NULL, 0,

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ThreatDetectionSuite VERSION 5.6.5 LANGUAGES C CXX)
+project(ThreatDetectionSuite VERSION 5.6.6 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "ThreatDetectionSuite user-mode build requires Windows; use build.sh for repository-only checks")
@@ -77,7 +77,7 @@ install(TARGETS TDSService TDSBridge
 
 # Testing Configuration
 enable_testing()
-set_target_properties(TDSService TDSBridge PROPERTIES
+set_target_properties(TDSCore TDSService TDSBridge PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
