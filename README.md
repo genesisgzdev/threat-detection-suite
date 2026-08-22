@@ -18,8 +18,8 @@
 The Threat Detection Suite (TDS) operates across two primary execution rings: Kernel-Mode (Ring 0) and User-Mode (Ring 3). This separation ensures that high-latency heuristic analysis does not induce system-wide DPC (Deferred Procedure Call) latency or bug checks (BSOD).
 
 ```mermaid
-graph TD;
-    subgraph Ring 0 [Kernel Mode]
+graph TD
+    subgraph KERNEL["Ring 0 - Kernel Mode"]
         WFP[WFP ALE IPv4 callout] --> |Network Telemetry| EL[Event Lookaside List];
         PROC[Process callback] --> EL;
         IMG[Image callback] --> EL;
@@ -30,17 +30,17 @@ graph TD;
         IOCTL[IOCTL_TDS_GET_NEXT_EVENT] --> |InterlockedPopEntrySList| SList;
     end
 
-    subgraph Ring 3 [User Mode]
+    subgraph USER["Ring 3 - User Mode"]
         SList --> |Buffered IRP| Svc[TDS Analysis Service];
         Svc --> |ETW-Ti Session| ETW[EtwCollector];
         Svc --> |MEM_PRIVATE Scan| YARA[MemoryScanner / libyara];
         Svc --> |Shannon Entropy| Heuristics[HeuristicsEngine];
-        Heuristics --> |Risk Score >= 70| IPS[IPSManager];
+        Heuristics --> |Risk threshold 70| IPS[IPSManager];
         IPS --> |NtTerminateProcess| Threat[Malicious Process];
         Heuristics --> |Log Event| Log[tds_threat_events.jsonl];
     end
     
-    subgraph Automation [Response]
+    subgraph RESPONSE["Automation - Response"]
         Log --> |tail -f| Bot[SOC Bot python];
         Bot --> |HTTP POST| GitHub[GitHub Issues API];
     end
