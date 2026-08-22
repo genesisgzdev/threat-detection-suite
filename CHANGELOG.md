@@ -5,6 +5,8 @@
 ### Security and runtime hardening
 
 - Unified the driver/user event ABI and corrected the TDS device/IOCTL contract.
+- Uses the secure device ACL and IOCTL access bits for policy authorization; executable names are not treated as identity.
+- WFP network events carry the validated address family, remote address, port and protocol fields.
 - Added bounded kernel event delivery, validated buffers, policy input and driver lifecycle cleanup.
 - Connected `TDSService` to kernel events and ETW-TI callback delivery.
 - Made response enforcement observe-first with explicit `contain` and `terminate` modes.
