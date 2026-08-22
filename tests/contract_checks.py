@@ -32,6 +32,12 @@ if "METHOD_OUT_DIRECT" in common:
     raise SystemExit("event IOCTL must use METHOD_BUFFERED while the driver copies SystemBuffer")
 if "TDS_RESPONSE_MODE" not in service:
     raise SystemExit("service response policy wiring missing")
+if "TDS_POLICY_FLAG_ENABLE_WFP" not in service or "TDS_POLICY_FLAG_ENABLE_MINIFILTER" not in service:
+    raise SystemExit("service must explicitly enable the registered telemetry callbacks")
+if "if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_WFP) == 0) return;" not in driver:
+    raise SystemExit("WFP callback ignores its runtime enable flag")
+if "if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_MINIFILTER) == 0) return FLT_PREOP_SUCCESS_NO_CALLBACK;" not in driver:
+    raise SystemExit("minifilter callback ignores its runtime enable flag")
 for marker in ("network->Ipv4Address = remoteAddress->uint32", "network->RemotePort = remotePort->uint16", "network->Protocol = protocol->uint8"):
     if marker not in driver:
         raise SystemExit(f"WFP network event field is not wired: {marker}")

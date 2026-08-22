@@ -197,7 +197,9 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     TDS_PROTECTION_POLICY policy = {};
     policy.Version = 1;
     policy.Size = sizeof(policy);
-    policy.Flags = TDS_POLICY_FLAG_PROTECT_SERVICE;
+    policy.Flags = TDS_POLICY_FLAG_PROTECT_SERVICE |
+                   TDS_POLICY_FLAG_ENABLE_WFP |
+                   TDS_POLICY_FLAG_ENABLE_MINIFILTER;
     policy.ObserveOnly = 1;
     policy.AllowProcessTermination = 0;
     policy.AllowNetworkContainment = 0;

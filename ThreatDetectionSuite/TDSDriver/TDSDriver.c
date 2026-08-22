@@ -238,6 +238,7 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
     policy = g_Policy;
     KeReleaseSpinLock(&g_PolicyLock, oldIrql);
     classifyOut->actionType = FWP_ACTION_PERMIT;
+    if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_WFP) == 0) return;
     if (inMetaValues->currentMetadataValues & FWPS_METADATA_FIELD_PROCESS_ID) {
         ULONG pid = (ULONG)inMetaValues->processId;
         if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) {
@@ -326,6 +327,12 @@ OB_PREOP_CALLBACK_STATUS TDSPreCallback(PVOID RegistrationContext, POB_PRE_OPERA
 
 FLT_PREOP_CALLBACK_STATUS TDSPreWriteCallback(_Inout_ PFLT_CALLBACK_DATA Data, _In_ PCFLT_RELATED_OBJECTS FltObjects, _Outptr_opt_ PVOID *CompletionContext) {
     if (Data->RequestorMode == KernelMode || (Data->Iopb->IrpFlags & IRP_PAGING_IO)) return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    TDS_PROTECTION_POLICY policy;
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_PolicyLock, &oldIrql);
+    policy = g_Policy;
+    KeReleaseSpinLock(&g_PolicyLock, oldIrql);
+    if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_MINIFILTER) == 0) return FLT_PREOP_SUCCESS_NO_CALLBACK;
     PEPROCESS req = FltGetRequestorProcess(Data);
     if (req && IsServiceProcess(req)) return FLT_PREOP_SUCCESS_NO_CALLBACK;
     if (Data->Iopb->Parameters.Write.Length > 65536) {

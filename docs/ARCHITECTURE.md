@@ -80,7 +80,7 @@ Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor d
 ## 3. Seguridad de la frontera kernel/user
 
 - Policy IOCTL exige `FILE_WRITE_ACCESS`, tamaño exacto, versión 1, flags conocidos y campos reservados en cero.
-- `TDS_POLICY_FLAG_PROTECT_SERVICE` habilita el filtrado de handles del proceso del servicio; el callback consulta la política vigente antes de aplicar esa protección.
+- `TDS_POLICY_FLAG_PROTECT_SERVICE` habilita el filtrado de handles del proceso del servicio; `TDS_POLICY_FLAG_ENABLE_WFP` y `TDS_POLICY_FLAG_ENABLE_MINIFILTER` habilitan respectivamente la telemetría de WFP y minifilter. Cada callback consulta la policy vigente antes de emitir o bloquear.
 - Event IOCTL exige `FILE_READ_ACCESS`, buffer de salida suficiente y el límite `MAX_EVENT_BUFFER_SIZE`.
 - Si el buffer de salida no alcanza para un evento válido, el driver lo vuelve a insertar y devuelve el tamaño requerido; esa consulta no se cuenta como pérdida.
 - El device limita el acceso mediante ACL y los bits del IOCTL. Tras una policy válida, el driver conserva una referencia al objeto `PEPROCESS` que estableció la sesión protegida, no un nombre ni un PID; limpia esa referencia cuando el proceso termina. El servicio vuelve a abrir el device si se desconecta.
