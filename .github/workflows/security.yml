@@ -5,7 +5,7 @@ on:
   pull_request:
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
     permissions:
       contents: read
       security-events: write
@@ -14,7 +14,13 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: c-cpp
-      - uses: github/codeql-action/autobuild@v3
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure user-mode build for CodeQL
+        run: cmake -S . -B build -A x64 -DTDS_ENABLE_YARA=OFF
+      - name: Build user-mode code for CodeQL
+        run: cmake --build build --config Release --parallel
       - uses: github/codeql-action/analyze@v3
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
