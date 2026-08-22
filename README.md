@@ -20,30 +20,30 @@ The Threat Detection Suite (TDS) operates across two primary execution rings: Ke
 ```mermaid
 graph TD
     subgraph KERNEL["Ring 0 - Kernel Mode"]
-        WFP[WFP ALE IPv4 callout] --> |Network Telemetry| EL[Event Lookaside List];
+        WFP[WFP ALE IPv4 callout] -->|Network Telemetry| EL[Event Lookaside List]
         PROC[Process callback] --> EL;
         IMG[Image callback] --> EL;
         THR[Thread callback] --> EL;
-        MF[Minifilter Callback] --> |File I/O Telemetry| EL;
-        OB[ObRegisterCallbacks] --> |Process Handle Req| EL;
-        EL --> |InterlockedPushEntrySList| SList[Lock-Free SList Queue];
-        IOCTL[IOCTL_TDS_GET_NEXT_EVENT] --> |InterlockedPopEntrySList| SList;
-        STATS[IOCTL_TDS_GET_QUEUE_STATS] --> |depth high-watermark drops| SList;
+        MF[Minifilter Callback] -->|File I/O Telemetry| EL
+        OB[ObRegisterCallbacks] -->|Process Handle Req| EL
+        EL -->|InterlockedPushEntrySList| SList[Lock-Free SList Queue]
+        IOCTL[IOCTL_TDS_GET_NEXT_EVENT] -->|InterlockedPopEntrySList| SList
+        STATS[IOCTL_TDS_GET_QUEUE_STATS] -->|depth high-watermark drops| SList
     end
 
     subgraph USER["Ring 3 - User Mode"]
-        SList --> |Buffered IRP| Svc[TDS Analysis Service];
-        Svc --> |ETW-Ti Session| ETW[EtwCollector];
-        Svc --> |MEM_PRIVATE Scan| YARA[MemoryScanner / libyara];
-        Svc --> |Shannon Entropy| Heuristics[HeuristicsEngine];
-        Heuristics --> |Risk threshold 70| IPS[IPSManager];
-        IPS --> |NtTerminateProcess| Threat[Malicious Process];
-        Heuristics --> |Log Event| Log[tds_threat_events.jsonl];
+        SList -->|Buffered IRP| Svc[TDS Analysis Service]
+        Svc -->|ETW-Ti Session| ETW[EtwCollector]
+        Svc -->|MEM_PRIVATE Scan| YARA["MemoryScanner / libyara"]
+        Svc -->|Shannon Entropy| Heuristics[HeuristicsEngine]
+        Heuristics -->|Risk threshold 70| IPS[IPSManager]
+        IPS -->|NtTerminateProcess| Threat[Malicious Process]
+        Heuristics -->|Log Event| Log[tds_threat_events.jsonl]
     end
     
     subgraph RESPONSE["Automation - Response"]
-        Log --> |tail -f| Bot[SOC Bot python];
-        Bot --> |HTTP POST| GitHub[GitHub Issues API];
+        Log -->|tail -f| Bot[SOC Bot python]
+        Bot -->|HTTP POST| GitHub[GitHub Issues API]
     end
 ```
 
