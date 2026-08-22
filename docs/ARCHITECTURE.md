@@ -8,7 +8,7 @@ La primera figura muestra el camino de un evento. La secuencia muestra el arranq
 
 ## 1. Componentes y contratos
 
-~~~mermaid
+```mermaid
 flowchart LR
     subgraph KERNEL[Windows kernel driver]
       PROC[process image thread callbacks]
@@ -39,7 +39,7 @@ flowchart LR
     ETW[ETW telemetry] --> E
     B[TDSBridge utility] --> E
     L --> SOC[SOC and OTLP tools]
-~~~
+```
 
 Precisión de build:
 
@@ -50,7 +50,7 @@ Precisión de build:
 
 ## 2. Arranque y ciclo de eventos
 
-~~~mermaid
+```mermaid
 sequenceDiagram
     participant SCM as Windows SCM
     participant S as TDSService
@@ -71,7 +71,7 @@ sequenceDiagram
     end
     S->>D: CloseHandle
     S->>E: Shutdown
-~~~
+```
 
 `observe` queda como política inicial. `contain` y `terminate` solo cambian los flags enviados al driver; no son evidencia de que la contención o terminación haya sido validada en una instalación Windows real.
 
