@@ -49,8 +49,8 @@ if "FILE_WRITE_ACCESS" not in common or "FILE_READ_ACCESS" not in common:
     raise SystemExit("IOCTL access contract is not separated")
 if "CmRegisterCallbackEx" not in driver or "g_RegistryCallbackRegistered" not in driver:
     raise SystemExit("registry callback is declared but not registered and cleaned up")
-if driver.count("if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4)") != 1:
-    raise SystemExit("WFP ALE IPv4 condition must have one guarded path")
+if "if (inFixedValues->layerId != FWPS_LAYER_ALE_AUTH_CONNECT_V4) return;" not in driver:
+    raise SystemExit("WFP callback must reject layers whose field indexes it cannot decode")
 if "const uint32_t targetPid = data->TargetPid" not in engine:
     raise SystemExit("injection response must target the decoded target PID")
 if "TDSEventEtwTiApcInjection" not in correlator or "EarlyInitializationPattern" not in correlator:

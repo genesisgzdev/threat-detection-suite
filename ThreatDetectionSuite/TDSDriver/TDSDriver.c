@@ -232,23 +232,22 @@ void WfpClassifyOutbound(const FWPS_INCOMING_VALUES0* inFixedValues, const FWPS_
     if ((policy.Flags & TDS_POLICY_FLAG_ENABLE_WFP) == 0) return;
     if (inMetaValues->currentMetadataValues & FWPS_METADATA_FIELD_PROCESS_ID) {
         ULONG pid = (ULONG)inMetaValues->processId;
-        if (inFixedValues->layerId == FWPS_LAYER_ALE_AUTH_CONNECT_V4) {
-            const ULONG remoteAddressIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS;
-            const ULONG remotePortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT;
-            const ULONG protocolIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL;
-            if (inFixedValues->valueCount <= remoteAddressIndex ||
-                inFixedValues->valueCount <= remotePortIndex ||
-                inFixedValues->valueCount <= protocolIndex) return;
-            const FWP_VALUE0* remoteAddress = &inFixedValues->incomingValue[remoteAddressIndex].value;
-            const FWP_VALUE0* remotePort = &inFixedValues->incomingValue[remotePortIndex].value;
-            const FWP_VALUE0* protocol = &inFixedValues->incomingValue[protocolIndex].value;
-            if (remoteAddress->type != FWP_UINT32 || remotePort->type != FWP_UINT16 || protocol->type != FWP_UINT8) return;
-            const UINT16 port = remotePort->uint16;
-            if (!policy.ObserveOnly && policy.AllowNetworkContainment &&
-                port == 53 && inMetaValues->packetSize > 512) {
-                classifyOut->actionType = FWP_ACTION_BLOCK;
-                return;
-            }
+        if (inFixedValues->layerId != FWPS_LAYER_ALE_AUTH_CONNECT_V4) return;
+        const ULONG remoteAddressIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_ADDRESS;
+        const ULONG remotePortIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_REMOTE_PORT;
+        const ULONG protocolIndex = FWPS_FIELD_ALE_AUTH_CONNECT_V4_IP_PROTOCOL;
+        if (inFixedValues->valueCount <= remoteAddressIndex ||
+            inFixedValues->valueCount <= remotePortIndex ||
+            inFixedValues->valueCount <= protocolIndex) return;
+        const FWP_VALUE0* remoteAddress = &inFixedValues->incomingValue[remoteAddressIndex].value;
+        const FWP_VALUE0* remotePort = &inFixedValues->incomingValue[remotePortIndex].value;
+        const FWP_VALUE0* protocol = &inFixedValues->incomingValue[protocolIndex].value;
+        if (remoteAddress->type != FWP_UINT32 || remotePort->type != FWP_UINT16 || protocol->type != FWP_UINT8) return;
+        const UINT16 port = remotePort->uint16;
+        if (!policy.ObserveOnly && policy.AllowNetworkContainment &&
+            port == 53 && inMetaValues->packetSize > 512) {
+            classifyOut->actionType = FWP_ACTION_BLOCK;
+            return;
         }
         PEVENT_ITEM item = (PEVENT_ITEM)ExAllocateFromNpagedLookasideList(&g_EventLookasideList);
         if (item) {
