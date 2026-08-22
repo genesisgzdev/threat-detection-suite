@@ -67,6 +67,8 @@ if "IoCreateDeviceSecure" not in driver:
     raise SystemExit("driver device ACL is not enforced")
 if "IsAuthorizedPolicyCaller" not in driver:
     raise SystemExit("policy caller authorization check missing")
+if "IsEdrProcess" in driver or "TDSService.exe" in driver:
+    raise SystemExit("driver policy authorization must not rely on an executable name")
 if "code == IOCTL_TDS_SET_PROTECTION_POLICY || code == IOCTL_TDS_SET_RUNTIME_POLICY" not in driver:
     raise SystemExit("runtime policy IOCTL is declared but not handled")
 if "OpenDriverWithPolicy" not in service or "ApplyProtectionPolicy" not in service:
