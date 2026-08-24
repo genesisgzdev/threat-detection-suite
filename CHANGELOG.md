@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Actualiza checkout en CI, auditoría y releases a la generación que ejecuta sobre Node 24.
+- Actualiza `setup-python` a la generación que ejecuta sobre Node 24.
+- Pinnea `msvc-dev-cmd` a v1.13.0; esa acción upstream todavía declara Node 20 y el runner lo ejecuta bajo compatibilidad de Node 24.
+- Corrige el callback WFP para limitar la decodificación a ALE IPv4 antes de usar sus índices y punteros de campos.
+- Corrige el fuzzer de IOCTL para no declarar tamaños mayores que sus buffers reales y evitar falsos crashes del propio harness.
+- El bridge user-mode valida que las rutas UTF-16 terminen dentro del payload antes de mostrarlas.
+
 ## [5.6.7] - 2026-08-22
 
 ### Security and runtime hardening
@@ -21,12 +30,23 @@
 - La compilación nativa y los checks de contrato siguen siendo gates separados de la validación del driver cargado.
 
 ## [Unreleased]
-- Attributed remote-thread, APC and ETW-TI responses to the decoded target PID instead of the telemetry emitter.
+
+- Retira GUIDs y handles de WFP IPv6 y `DATAGRAM_DATA` que no tenían registro ni camino de cleanup; el driver deja declarada solo la cobertura ALE IPv4 que realmente instala.
+- Corrige la ruta de fallo de carga del minifilter para desregistrar también las callbacks de imagen e hilo antes de descargar el driver.
+- La respuesta user-mode suprime containment/termination para procesos protegidos y del sistema como barrera adicional contra false positives.
+- El callback de protección conecta la verificación de LSASS además de la identidad `PEPROCESS` del servicio.
+- Las flags `ENABLE_WFP` y `ENABLE_MINIFILTER` gobiernan sus callbacks; el servicio las solicita explícitamente y los checks de contrato lo verifican.
+- Ordena la cola user-mode por timestamp compartido para compensar el transporte LIFO del driver antes de ejecutar heurísticas y correlación.
+- Preserva un evento válido cuando `IOCTL_TDS_GET_NEXT_EVENT` recibe un buffer demasiado pequeño; la pérdida queda limitada a presión de cola o registros inválidos.
+- Keeps ETW-TI emitter and target identity separate; when the provider does not expose a target, response actions are suppressed instead of reusing the emitter PID.
 - Correlated ETW/APC signals during process initialization; the repository does not label this Early Bird proof until native ground-truth validation exists.
 - Registered the declared Registry callback, separated read/write IOCTL access bits and removed the duplicate WFP classify guard.
 - Registered process, image and thread notifications and exposed queue depth and dropped-event counters.
 - Corrected the WFP contract to describe the registered ALE IPv4 callout.
 - Self-protection now uses the service PID captured through the policy IOCTL instead of an executable name.
+- Minifilter ransomware events now use the filesystem requestor process rather than the callback worker process; the contract check prevents this attribution from regressing.
+- El modo `terminate` mantiene la escalera `contain >=85` y `terminate >=95`; el umbral heurístico de 70 solo genera una alerta candidata y no implica terminación.
+- WFP inicializa una decisión `PERMIT` antes de validar campos opcionales, evitando que una entrada incompleta deje la acción sin definir.
 
 All notable changes to the Threat Detection Suite (TDS) project will be documented in this file.
 
@@ -46,7 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **YARA Memory Scanning**: Integrated the YARA engine for high-fidelity scanning of anonymous and private executable memory pages, enabling detection of reflective loading and fileless implants.
 - **Event-Driven Architecture**: Transitioned the user-mode/kernel-mode communication from synchronous polling to an asynchronous inverted call model via `IOCTL_TDS_GET_NEXT_EVENT`.
-- **Network Interception**: Implemented Windows Filtering Platform (WFP) callouts at the ALE Auth Connect and Datagram Data layers (`FWPM_LAYER_ALE_AUTH_CONNECT_V4/V6`, `FWPM_LAYER_DATAGRAM_DATA_V4/V6`) for native network metadata extraction.
 - **Self-Protection Mechanisms**: Integrated `ObRegisterCallbacks` to intercept and strip unauthorized access rights (`PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `THREAD_SET_CONTEXT`) targeting the EDR process and threads.
 - **LSASS Hardening**: Enforced mandatory path validation (`\Device\HarddiskVolume` + `\Windows\System32\lsass.exe`) to prevent path-spoofing evasion attempts.
 - **Forensic Pipeline**: Automated JSONL event generation and integrated a `ForensicManager` for `MiniDumpWriteDump` execution on critical alerts.
@@ -62,3 +81,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced hardcoded dependency on versions across CMake, Dockerfile, and build scripts.
 - Upgraded the CI/CD pipeline to use official `snyk/actions/cpp@master` and `google/osv-scanner-action@v1` for SAST and SCA scanning with SARIF reporting.
 - Restructured `TDSCommon.h` to align atomics outside of packed structs, preventing undefined behavior (UB).
+- El device del driver concede escritura de política a LocalSystem y deja a los administradores con acceso de lectura; el contrato de Windows comprueba que una cuenta elevada ajena no pueda enviar IOCTLs de escritura.

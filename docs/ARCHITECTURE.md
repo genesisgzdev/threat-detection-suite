@@ -8,7 +8,7 @@ La primera figura muestra el camino de un evento. La secuencia muestra el arranq
 
 ## 1. Componentes y contratos
 
-~~~mermaid
+```mermaid
 flowchart LR
     subgraph KERNEL[Windows kernel driver]
       PROC[process image thread callbacks]
@@ -39,7 +39,7 @@ flowchart LR
     ETW[ETW telemetry] --> E
     B[TDSBridge utility] --> E
     L --> SOC[SOC and OTLP tools]
-~~~
+```
 
 Precisión de build:
 
@@ -50,7 +50,7 @@ Precisión de build:
 
 ## 2. Arranque y ciclo de eventos
 
-~~~mermaid
+```mermaid
 sequenceDiagram
     participant SCM as Windows SCM
     participant S as TDSService
@@ -71,18 +71,22 @@ sequenceDiagram
     end
     S->>D: CloseHandle
     S->>E: Shutdown
-~~~
+```
 
 `observe` queda como política inicial. `contain` y `terminate` solo cambian los flags enviados al driver; no son evidencia de que la contención o terminación haya sido validada en una instalación Windows real.
 
-Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor del proceso objetivo cuando el ABI lo entrega. Las respuestas y el correlador usan `TargetProcessId`; el collector ETW actual solo puede atribuir al emisor cuando el proveedor no entrega un objetivo decodificable. La secuencia de APC antes de la primera imagen o actividad de hilo se marca como inicialización temprana, no como prueba definitiva de Early Bird.
+Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor del proceso objetivo cuando el ABI lo entrega. El collector ETW conserva el emisor y marca el objetivo como desconocido cuando aún no puede decodificarlo; en ese caso el correlador no inventa un target y las respuestas automáticas quedan suprimidas. La secuencia de APC antes de la primera imagen o actividad de hilo se marca como inicialización temprana, no como prueba definitiva de Early Bird. El motor de heurísticas borra el contexto anterior al recibir un nuevo evento de creación para que un PID reciclado no herede puntuación. El estado del correlador vive solo durante el proceso del servicio: no se persiste entre reinicios porque un PID no es una identidad durable.
 
 ## 3. Seguridad de la frontera kernel/user
 
 - Policy IOCTL exige `FILE_WRITE_ACCESS`, tamaño exacto, versión 1, flags conocidos y campos reservados en cero.
+- `TDS_POLICY_FLAG_PROTECT_SERVICE` habilita el filtrado de handles del proceso del servicio y de la imagen LSASS verificada; `TDS_POLICY_FLAG_ENABLE_WFP` y `TDS_POLICY_FLAG_ENABLE_MINIFILTER` habilitan respectivamente la telemetría de WFP y minifilter. Cada callback consulta la policy vigente antes de emitir o bloquear.
+- `IPSManager` mantiene una exclusión deny-only para PID 0-4, `lsass.exe` y `TDSService.exe` antes de containment/termination. Es una defensa adicional y no una primitiva de identidad.
 - Event IOCTL exige `FILE_READ_ACCESS`, buffer de salida suficiente y el límite `MAX_EVENT_BUFFER_SIZE`.
-- El driver comprueba que el solicitante de la policy sea el proceso TDS autorizado; el servicio vuelve a abrir el device si se desconecta.
+- Si el buffer de salida no alcanza para un evento válido, el driver lo vuelve a insertar y devuelve el tamaño requerido; esa consulta no se cuenta como pérdida.
+- El device limita el acceso mediante ACL y los bits del IOCTL. Tras una policy válida, el driver conserva una referencia al objeto `PEPROCESS` que estableció la sesión protegida, no un nombre ni un PID; limpia esa referencia cuando el proceso termina. El servicio vuelve a abrir el device si se desconecta.
 - La cola kernel->user es acotada para que el flujo de eventos no convierta una ráfaga en crecimiento sin límite de memoria. La cola de análisis user-mode también expone profundidad, high-water mark y descartes por tipo para hacer visible la presión de transporte.
+- El driver usa una `SLIST` LIFO; al entrar al `EventBus`, la cola de análisis prioriza el `Timestamp` compartido para no invertir una ráfaga antes de heurísticas y correlación. Esto no corrige eventos tardíos entre proveedores ni establece un orden total que el ABI no entregue.
 
 ## 4. Qué prueba cada gate
 

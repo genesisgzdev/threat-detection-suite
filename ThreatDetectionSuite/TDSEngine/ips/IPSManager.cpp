@@ -9,6 +9,7 @@
 #include <winternl.h>
 #include <iostream>
 #include <vector>
+#include <cwchar>
 #include "IPSManager.h"
 #include "../Logger.h"
 
@@ -22,11 +23,33 @@
 
 namespace TDS {
 
+bool IPSManager::IsProtectedProcess(DWORD pid) {
+    // This is a user-mode fail-safe in addition to the kernel handle policy.
+    // A basename match is deliberately deny-only: it never grants trust.
+    if (pid <= 4) return true;
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess) return true;
+
+    wchar_t path[32768] = {};
+    DWORD length = static_cast<DWORD>(sizeof(path) / sizeof(path[0]));
+    const bool queried = QueryFullProcessImageNameW(hProcess, 0, path, &length) != FALSE;
+    CloseHandle(hProcess);
+    if (!queried) return true;
+
+    const wchar_t* basename = wcsrchr(path, L'\\');
+    basename = basename ? basename + 1 : path;
+    return _wcsicmp(basename, L"lsass.exe") == 0 ||
+           _wcsicmp(basename, L"TDSService.exe") == 0;
+}
+
 typedef NTSTATUS(NTAPI *pfnNtSuspendProcess)(HANDLE ProcessHandle);
 typedef NTSTATUS(NTAPI *pfnNtTerminateProcess)(HANDLE ProcessHandle, NTSTATUS ExitStatus);
 
 bool IPSManager::ContainProcess(DWORD pid) {
-    if (pid <= 4) return false; 
+    if (IsProtectedProcess(pid)) {
+        Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_PROCESS_BEHAVIOR, "IPS: protected process response suppressed", "deny-only safeguard", pid);
+        return false;
+    }
 
     HANDLE hProcess = OpenProcess(PROCESS_SUSPEND_RESUME | PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (!hProcess) return false;
@@ -46,7 +69,10 @@ bool IPSManager::ContainProcess(DWORD pid) {
 }
 
 bool IPSManager::TerminateMaliciousProcess(DWORD pid) {
-    if (pid <= 4) return false;
+    if (IsProtectedProcess(pid)) {
+        Logger::Instance().LogThreat(TDS_SEVERITY_INFO, CAT_PROCESS_BEHAVIOR, "IPS: protected process termination suppressed", "deny-only safeguard", pid);
+        return false;
+    }
 
     HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
     if (!hProcess) return false;

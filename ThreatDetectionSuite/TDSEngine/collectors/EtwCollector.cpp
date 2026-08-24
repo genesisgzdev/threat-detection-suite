@@ -73,7 +73,10 @@ void EtwCollector::HandleEvent(PEVENT_RECORD pEvent) {
     event.Pid = pEvent->EventHeader.ProcessId;
     event.Tid = pEvent->EventHeader.ThreadId;
     event.Timestamp = pEvent->EventHeader.TimeStamp.QuadPart;
-    event.Data = RemoteThreadEvent{event.Pid};
+    // The provider event header identifies the emitter. The current decoder
+    // does not extract a target process from the provider payload, so never
+    // reuse the emitter PID as a response target.
+    event.Data = EtwApcEvent{event.Pid, 0, false};
     m_handler(event);
 }
 }

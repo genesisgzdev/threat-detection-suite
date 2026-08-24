@@ -5,14 +5,6 @@
 
 namespace TDS {
 
-SequenceCorrelator::SequenceCorrelator() {
-    LoadFromDisk();
-}
-
-SequenceCorrelator::~SequenceCorrelator() {
-    SaveToDisk();
-}
-
 void SequenceCorrelator::Analyze(const Event& event) {
     if (event.Type == TDSEventProcessCreate) {
         if (auto data = std::get_if<ProcessEvent>(&event.Data)) {
@@ -32,6 +24,19 @@ void SequenceCorrelator::Analyze(const Event& event) {
     if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection ||
         event.Type == TDSEventEtwTiApcInjection) {
         const auto* injection = std::get_if<RemoteThreadEvent>(&event.Data);
+        if (event.Type == TDSEventEtwTiApcInjection) {
+            const auto* etw = std::get_if<EtwApcEvent>(&event.Data);
+            if (!etw || !etw->TargetKnown) return;
+            auto it = m_processStates.find(etw->TargetPid);
+            if (it == m_processStates.end()) return;
+            ProcessContext& ctx = it->second;
+            if (!ctx.Initialized) {
+                Logger::Instance().LogThreat(TDS_SEVERITY_CRITICAL, CAT_DLL_INJECTION,
+                    "APC or remote-thread activity during process initialization",
+                    "EarlyInitializationPattern", etw->TargetPid);
+            }
+            return;
+        }
         const uint32_t targetPid = injection ? injection->TargetPid : event.Pid;
         auto it = m_processStates.find(targetPid);
         if (it != m_processStates.end()) {
@@ -59,8 +64,5 @@ void SequenceCorrelator::Analyze(const Event& event) {
         }
     }
 }
-
-void SequenceCorrelator::SaveToDisk() {}
-void SequenceCorrelator::LoadFromDisk() {}
 
 } // namespace TDS

@@ -92,22 +92,26 @@ int main() {
 
                 DWORD bytesReturned = 0;
                 
-                // Call DeviceIoControl with mutated inputs and boundary sizes
+                // Never pass a length larger than the backing allocation. The
+                // Win32 API validates user buffers before the driver sees the
+                // request; claiming 0xFFFFFFFF with a tiny vector only crashes
+                // this harness and tells us nothing about the driver.
+                const DWORD input_length = static_cast<DWORD>(alloc_size);
+                const DWORD output_length = static_cast<DWORD>(outBuffer.size());
                 BOOL result = DeviceIoControl(
                     hDevice,
                     ioctl,
                     inBuffer.empty() ? NULL : inBuffer.data(),
-                    static_cast<DWORD>(target_size), // Passing the actual target size, potentially 0xFFFFFFFF
+                    input_length,
                     outBuffer.empty() ? NULL : outBuffer.data(),
-                    static_cast<DWORD>(target_size),
+                    output_length,
                     &bytesReturned,
                     NULL
                 );
 
                 // We don't necessarily care about the result, we are looking for crashes (BSOD)
-                // Optionally log unexpected successes if the size is 0xFFFFFFFF
-                if (result && target_size == 0xFFFFFFFF) {
-                    std::cout << "    [!] Warning: IOCTL succeeded with size 0xFFFFFFFF!" << std::endl;
+                if (result && target_size >= 0x7FFFFFFF) {
+                    std::cout << "    [!] Warning: IOCTL succeeded with capped allocation for oversized request." << std::endl;
                 }
             }
         }

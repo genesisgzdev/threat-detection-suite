@@ -25,6 +25,17 @@
 
 static std::atomic<bool> global_monitoring_active{true};
 
+static bool ReadBoundedWideString(const BYTE* payload, ULONG payloadSize, ULONG offset, std::wstring& value) {
+    if (!payload || offset >= payloadSize || (payloadSize - offset) < sizeof(WCHAR) || offset % sizeof(WCHAR) != 0) return false;
+    const auto* start = reinterpret_cast<const WCHAR*>(payload + offset);
+    const ULONG remaining = (payloadSize - offset) / sizeof(WCHAR);
+    ULONG length = 0;
+    while (length < remaining && start[length] != L'\0') ++length;
+    if (length == remaining) return false;
+    value.assign(start, length);
+    return true;
+}
+
 class TDSBridge {
 public:
     TDSBridge() : m_hDevice(INVALID_HANDLE_VALUE) {}
@@ -115,15 +126,13 @@ private:
         if (header->Type == TDSEventProcessCreate) {
             if (payloadSize < sizeof(TDS_PROCESS_EVENT_DATA)) { printf("[malformed]\n"); return; }
             PTDS_PROCESS_EVENT_DATA ev = (PTDS_PROCESS_EVENT_DATA)payload;
-            if (ev->ImagePathOffset < payloadSize && ev->ImagePathOffset % sizeof(WCHAR) == 0) {
-                wprintf(L"Path: %s ", (WCHAR*)((BYTE*)ev + ev->ImagePathOffset));
-            }
+            std::wstring path;
+            if (ReadBoundedWideString(payload, payloadSize, ev->ImagePathOffset, path)) wprintf(L"Path: %s ", path.c_str());
         } else if (header->Type == TDSEventImageLoad) {
             if (payloadSize < sizeof(TDS_IMAGE_LOAD_DATA)) { printf("[malformed]\n"); return; }
             PTDS_IMAGE_LOAD_DATA ev = (PTDS_IMAGE_LOAD_DATA)payload;
-            if (ev->ImagePathOffset < payloadSize && ev->ImagePathOffset % sizeof(WCHAR) == 0) {
-                wprintf(L"Module: %s ", (WCHAR*)((BYTE*)ev + ev->ImagePathOffset));
-            }
+            std::wstring path;
+            if (ReadBoundedWideString(payload, payloadSize, ev->ImagePathOffset, path)) wprintf(L"Module: %s ", path.c_str());
         }
         printf("\n");
     }

@@ -13,8 +13,10 @@ For an isolated administrator test machine, install the signed test driver and
 service, then verify:
 
 1. A standard user cannot open `\\.\TDS_Core_Link` for policy writes.
-2. An unrelated elevated process receives `ERROR_ACCESS_DENIED` when sending
-   `IOCTL_TDS_SET_PROTECTION_POLICY`.
+2. An unrelated elevated administrator receives `ERROR_ACCESS_DENIED` when
+   sending `IOCTL_TDS_SET_PROTECTION_POLICY`; the device ACL grants that group
+   read-only inspection, while the LocalSystem service retains policy write
+   access.
 3. `TDSService` can set observe mode and the configured response mode.
 4. Restarting the driver/device causes the service to reconnect only after the
    policy IOCTL succeeds.

@@ -13,7 +13,7 @@
 #include "TDSEngine.h"
 #include "collectors/EtwCollector.h"
 
-// Threat Detection Suite v5.6.6 - Native Windows Service
+// Threat Detection Suite v5.6.7 - Native Windows Service
 
 SERVICE_STATUS        g_ServiceStatus = {0};
 SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
@@ -197,7 +197,9 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     TDS_PROTECTION_POLICY policy = {};
     policy.Version = 1;
     policy.Size = sizeof(policy);
-    policy.Flags = TDS_POLICY_FLAG_PROTECT_SERVICE;
+    policy.Flags = TDS_POLICY_FLAG_PROTECT_SERVICE |
+                   TDS_POLICY_FLAG_ENABLE_WFP |
+                   TDS_POLICY_FLAG_ENABLE_MINIFILTER;
     policy.ObserveOnly = 1;
     policy.AllowProcessTermination = 0;
     policy.AllowNetworkContainment = 0;
@@ -220,6 +222,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     BYTE buffer[MAX_EVENT_BUFFER_SIZE];
     DWORD bytesReturned = 0;
     TDS_QUEUE_STATS queueStats = {};
+    ULONG lastDroppedEvents = 0;
     while (WaitForSingleObject(g_ServiceStopEvent, 1000) == WAIT_TIMEOUT) {
         if (hDevice == INVALID_HANDLE_VALUE) {
             hDevice = OpenDriverWithPolicy(policy);
@@ -230,8 +233,12 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
         }
         if (DeviceIoControl(hDevice, IOCTL_TDS_GET_QUEUE_STATS, NULL, 0,
                             &queueStats, sizeof(queueStats), &bytesReturned, NULL) &&
-            queueStats.DroppedEvents > 0) {
-            OutputDebugStringW(L"TDS kernel event queue has dropped events\n");
+            queueStats.DroppedEvents != lastDroppedEvents) {
+            wchar_t message[192] = {};
+            swprintf_s(message, L"TDS kernel queue depth=%lu high_watermark=%lu dropped=%lu\n",
+                       queueStats.QueueDepth, queueStats.HighWatermark, queueStats.DroppedEvents);
+            OutputDebugStringW(message);
+            lastDroppedEvents = queueStats.DroppedEvents;
         }
         while (DeviceIoControl(hDevice, IOCTL_TDS_GET_NEXT_EVENT, NULL, 0,
                                buffer, sizeof(buffer), &bytesReturned, NULL)) {

@@ -20,29 +20,31 @@ The Threat Detection Suite (TDS) operates across two primary execution rings: Ke
 ```mermaid
 graph TD
     subgraph KERNEL["Ring 0 - Kernel Mode"]
-        WFP[WFP ALE IPv4 callout] --> |Network Telemetry| EL[Event Lookaside List];
+        WFP[WFP ALE IPv4 callout] -->|Network Telemetry| EL[Event Lookaside List]
         PROC[Process callback] --> EL;
         IMG[Image callback] --> EL;
         THR[Thread callback] --> EL;
-        MF[Minifilter Callback] --> |File I/O Telemetry| EL;
-        OB[ObRegisterCallbacks] --> |Process Handle Req| EL;
-        EL --> |InterlockedPushEntrySList| SList[Lock-Free SList Queue];
-        IOCTL[IOCTL_TDS_GET_NEXT_EVENT] --> |InterlockedPopEntrySList| SList;
+        MF[Minifilter Callback] -->|File I/O Telemetry| EL
+        OB[ObRegisterCallbacks] -->|Process Handle Req| EL
+        EL -->|InterlockedPushEntrySList| SList[Lock-Free SList Queue]
+        IOCTL[IOCTL_TDS_GET_NEXT_EVENT] -->|InterlockedPopEntrySList| SList
+        STATS[IOCTL_TDS_GET_QUEUE_STATS] -->|depth high-watermark drops| SList
     end
 
     subgraph USER["Ring 3 - User Mode"]
-        SList --> |Buffered IRP| Svc[TDS Analysis Service];
-        Svc --> |ETW-Ti Session| ETW[EtwCollector];
-        Svc --> |MEM_PRIVATE Scan| YARA[MemoryScanner / libyara];
-        Svc --> |Shannon Entropy| Heuristics[HeuristicsEngine];
-        Heuristics --> |Risk threshold 70| IPS[IPSManager];
-        IPS --> |NtTerminateProcess| Threat[Malicious Process];
-        Heuristics --> |Log Event| Log[tds_threat_events.jsonl];
+        SList -->|Buffered IRP| Svc[TDS Analysis Service]
+        Svc -->|ETW-Ti Session| ETW[EtwCollector]
+        Svc -->|MEM_PRIVATE Scan| YARA["MemoryScanner / libyara"]
+        Svc -->|Shannon Entropy| Heuristics[HeuristicsEngine]
+        Heuristics -->|score 70: alert candidate| RP[ResponsePolicy]
+        RP -->|contain >=85 or terminate >=95| IPS[IPSManager]
+        IPS -->|NtTerminateProcess| Threat[Malicious Process]
+        Heuristics -->|Log Event| Log[tds_threat_events.jsonl]
     end
     
     subgraph RESPONSE["Automation - Response"]
-        Log --> |tail -f| Bot[SOC Bot python];
-        Bot --> |HTTP POST| GitHub[GitHub Issues API];
+        Log -->|tail -f| Bot[SOC Bot python]
+        Bot -->|HTTP POST| GitHub[GitHub Issues API]
     end
 ```
 
@@ -54,21 +56,25 @@ El driver registra hoy un sublayer dinámico y un callout en `FWPS_LAYER_ALE_AUT
 ### 2. Lock-Free Telemetry Queuing
 Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ransomware encrypting a drive) causes severe processor contention.
 - **Memory Allocation**: The driver initializes an `NPAGED_LOOKASIDE_LIST` during `DriverEntry`. High-frequency callbacks allocate event buffers from this pool, guaranteeing constant-time, fragmentation-free allocation.
-- **Queueing**: Events are pushed to an `SLIST_HEADER` using `InterlockedPushEntrySList`. The user-mode service retrieves them via `IOCTL_TDS_GET_NEXT_EVENT` using `InterlockedPopEntrySList`. This completely eliminates spinning waits.
+- **Queueing**: Events are pushed to an `SLIST_HEADER` using `InterlockedPushEntrySList`. The user-mode service retrieves them via `IOCTL_TDS_GET_NEXT_EVENT` using `InterlockedPopEntrySList`. If the caller's buffer is too small, a valid event is reinserted and the required size is returned; only invalid records or a full queue count as drops. `IOCTL_TDS_GET_QUEUE_STATS` exposes current depth, high-water mark and cumulative drops so a bounded queue cannot lose evidence silently. This does not recover drops caused by pressure; it makes them observable.
 
 ### 3. IOCTL boundary and queue pressure
-Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites antes de copiar datos. La política se autoriza por el ACL del device seguro y por el access bit del IOCTL; el driver no confía en el nombre o la ruta del ejecutable solicitante. `IOCTL_TDS_GET_QUEUE_STATS` expone profundidad y eventos descartados; cuando la cola llega a `EVENT_QUEUE_LIMIT`, el driver descarta el evento y aumenta el contador en vez de crecer sin límite. La fuzzing de IRP, Driver Verifier y las pruebas de unload siguen siendo validación nativa pendiente.
+Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites antes de copiar datos. La política se autoriza por el ACL del device seguro y por el access bit del IOCTL; el driver no confía en el nombre o la ruta del ejecutable solicitante. Un buffer de salida insuficiente no consume un evento válido. La cola de análisis ordena por el timestamp común porque la `SLIST` del transporte kernel es LIFO; un evento que llega tarde sigue marcado como telemetría tardía y no se convierte en una garantía de orden total. `IOCTL_TDS_GET_QUEUE_STATS` expone profundidad y eventos descartados; cuando la cola llega a `EVENT_QUEUE_LIMIT`, el driver descarta el evento y aumenta el contador en vez de crecer sin límite. El callback WFP parte de `PERMIT` incluso si faltan campos de telemetría; sólo una política de containment válida puede cambiar esa decisión. La fuzzing de IRP, Driver Verifier y las pruebas de unload siguen siendo validación nativa pendiente.
+
+`TDS_POLICY_FLAG_PROTECT_SERVICE` controla el filtrado de handles contra el proceso del servicio, sus hilos y la imagen LSASS verificada. `TDS_POLICY_FLAG_ENABLE_WFP` y `TDS_POLICY_FLAG_ENABLE_MINIFILTER` controlan la emisión de sus callbacks registrados; el servicio solicita explícitamente esas señales al aplicar la policy. La protección no se activa por el mero hecho de abrir el device; cada callback toma una copia de la política vigente antes de decidir.
+
+La respuesta user-mode aplica además una barrera deny-only para PID 0-4, `lsass.exe` y `TDSService.exe` antes de suspender o terminar. Esa barrera no autentica procesos ni sustituye el ACL del device; evita que un false positive de heurística convierta la respuesta automática en una caída del sistema.
 
 El `EventBus` de user-mode mantiene una segunda cola acotada para el análisis. Sus métricas separan profundidad actual, máximo observado, descartados totales y descartados por tipo de evento. Un descarte en cualquiera de las dos colas significa telemetría incompleta; no se interpreta como ausencia de actividad.
 
 ### 4. Process Tamper Protection
 Protection of critical processes (such as LSASS and the TDS user-mode service) is implemented via `ObRegisterCallbacks`.
-- **Identity**: the service PID is captured from the process that successfully sets the policy through the device IOCTL. LSASS still uses `PsGetProcessSignatureLevel()` and a system path check. The service path is not used as an authorization primitive.
+- **Identity**: the driver retains a referenced `PEPROCESS` for the process that successfully sets the policy through the device IOCTL and clears it on process termination. LSASS still uses `PsGetProcessSignatureLevel()` and a system path check. A PID or executable path is not used as an identity primitive.
 - **Access Stripping**: Handles requesting `PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `PROCESS_SUSPEND_RESUME`, or `PROCESS_CREATE_THREAD` against protected PIDs have those flags stripped from their `DesiredAccess` mask by the kernel.
 
 ### 5. Minifilter Reentrancy Prevention
 To prevent infinite recursion deadlocks—where the EDR intercepts its own log writes—the driver implements requestor-awareness.
-- `TDSPreWriteCallback` invokes `FltGetRequestorProcess()`. If the originating process is the TDS user-mode service, the IRP is skipped (`FLT_PREOP_SUCCESS_NO_CALLBACK`).
+- `TDSPreWriteCallback` invokes `FltGetRequestorProcess()`. If the originating process is the TDS user-mode service, the IRP is skipped (`FLT_PREOP_SUCCESS_NO_CALLBACK`). Events use `PsGetProcessId(requestor)` because the callback may run on a filesystem worker thread; `PsGetCurrentProcessId()` is not treated as the originator.
 - The registration currently covers writes. Paging-I/O exclusion is not claimed by the source and must not be inferred from the documentation.
 
 ### 6. User-Mode Memory Scanning and YARA
