@@ -87,3 +87,9 @@ The `tools/soc/soc_bot.py` script provides real-time automated reporting.
 - It performs a non-blocking `tail` on the `tds_threat_events.jsonl` log file.
 - When an event with `HIGH` or `CRITICAL` severity is written by the `HeuristicsEngine`, the bot constructs a Markdown report and pushes it to the GitHub Issues API using standard HTTPS requests.
 - The bot relies strictly on environment variables (`GITHUB_TOKEN`, `TDS_LOG_PATH`), containing no hardcoded local paths or credentials.
+
+## Entrega y cierre del proceso
+
+El EventBus conserva el orden de inserción cuando coinciden los timestamps y drena los eventos aceptados al detenerse. CTest ejecuta estos casos sobre Windows, incluido el límite de capacidad y sus métricas. Cada proceso usa su propia sesión ETW, sin detener una sesión ajena al arrancar.
+
+El exportador `tools/soc/otlp_exporter.py` lee lotes acotados de 100 registros completos, reintenta errores HTTP sin adelantar el cursor y detecta reemplazos del archivo mediante su identidad. El checkpoint se escribe de forma atómica después de una entrega aceptada. La entrega es al menos una vez: una caída después del HTTP exitoso y antes del checkpoint puede repetir un lote. No recupera archivos ya eliminados durante una rotación. `OTEL_EXPORTER_OTLP_HEADERS` usa pares separados por coma, por ejemplo `Authorization=Bearer%20TOKEN`; no se registran esos valores. Las pruebas usan un servidor HTTP local que primero falla y después acepta el lote.

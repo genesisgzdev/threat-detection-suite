@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <queue>
 #include <vector>
 #include <mutex>
@@ -32,7 +32,7 @@ public:
             ++m_dropped_by_type[static_cast<int>(event.Type)];
             return false;
         }
-        m_queue.push(event);
+        m_queue.push(QueuedEvent{event, m_sequence++});
         if (m_queue.size() > m_high_watermark) m_high_watermark = m_queue.size();
         m_cv.notify_one();
         return true;
@@ -42,12 +42,17 @@ public:
         std::unique_lock<std::mutex> lock(m_mutex);
         if (m_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !m_queue.empty() || m_stop; })) {
             if (!m_queue.empty()) {
-                Event event = m_queue.top();
+                Event event = m_queue.top().event;
                 m_queue.pop();
                 return event;
             }
         }
         return std::nullopt;
+    }
+
+    void Resume() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_stop = false;
     }
 
     void Stop() {
@@ -71,7 +76,16 @@ private:
     // analysis side by the shared timestamp before correlation. This fixes
     // inversion inside a burst; it does not make late cross-source events
     // disappear or prove a total order that the providers do not expose.
-    std::priority_queue<Event, std::vector<Event>, EventTimestampOrder> m_queue;
+    struct QueuedEvent { Event event; uint64_t sequence; };
+    struct Order {
+        bool operator()(const QueuedEvent& left, const QueuedEvent& right) const {
+            if (left.event.Timestamp != right.event.Timestamp)
+                return left.event.Timestamp > right.event.Timestamp;
+            return left.sequence > right.sequence;
+        }
+    };
+    std::priority_queue<QueuedEvent, std::vector<QueuedEvent>, Order> m_queue;
+    uint64_t m_sequence{0};
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     bool m_stop{false};
