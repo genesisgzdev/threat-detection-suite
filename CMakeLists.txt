@@ -98,3 +98,6 @@ add_custom_target(TDSDriverBuild
         "${CMAKE_SOURCE_DIR}/tools/build-driver.ps1"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Building Threat Detection Suite kernel driver with WDK")
+
+add_executable(TDSEventBusTests tests/windows/event_bus_runtime.cpp)
+add_test(NAME event_bus_runtime COMMAND TDSEventBusTests)

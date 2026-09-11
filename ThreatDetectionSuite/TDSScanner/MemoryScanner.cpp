@@ -149,7 +149,7 @@ bool MemoryScanner::DetectDirectSyscalls(HANDLE hProcess, LPVOID baseAddress, SI
     for (SIZE_T offset = 0; offset < regionSize; offset += CHUNK_SIZE) {
         SIZE_T toRead = min(CHUNK_SIZE, regionSize - offset);
         if (ReadProcessMemory(hProcess, (PBYTE)baseAddress + offset, buffer, toRead, &bytesRead)) {
-            for (SIZE_T i = 0; i < bytesRead - 1; i++) {
+            for (SIZE_T i = 0; i + 1 < bytesRead; i++) {
                 if ((buffer[i] == 0x0F && buffer[i + 1] == 0x05) || 
                     (buffer[i] == 0x0F && buffer[i + 1] == 0x34)) {
                     return true;
@@ -191,7 +191,7 @@ void MemoryScanner::ScanProcessHooks(HANDLE hProcess) {
     HMODULE hMods[1024];
     DWORD cbNeeded;
     if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
-        for (unsigned i = 0; i < (cbNeeded / sizeof(HMODULE)); i++) {
+        for (size_t i = 0; i < (std::min)(static_cast<size_t>(cbNeeded) / sizeof(HMODULE), size_t{1024}); i++) {
             WCHAR szModName[MAX_PATH];
             if (GetModuleFileNameExW(hProcess, hMods[i], szModName, sizeof(szModName) / sizeof(WCHAR))) {
                 std::wstring modNameStr = szModName;
@@ -276,7 +276,7 @@ void MemoryScanner::ScanProcessHooks(HANDLE hProcess) {
                     bool hookFound = false;
                     std::string hookType = "";
                     
-                    for (SIZE_T i = 0; i < toRead - 2; i++) {
+                    for (SIZE_T i = 0; i + 2 < toRead; i++) {
                         if (sample[i] == 0xE9) { hookFound = true; hookType = "JMP Relative"; break; }
                         else if (sample[i] == 0xFF && sample[i+1] == 0x25) { hookFound = true; hookType = "JMP Indirect"; break; }
                         else if (sample[i] == 0x48 && sample[i+1] == 0xB8) { hookFound = true; hookType = "MOV RAX, Abs"; break; }

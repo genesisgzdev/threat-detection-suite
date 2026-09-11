@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import os
 import time
+import tempfile
+from urllib.parse import unquote
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -46,9 +48,13 @@ def send(payload: dict) -> bool:
     if not url:
         return False
     headers = {"Content-Type": "application/json"}
-    token = os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", "").strip()
-    if token:
-        headers["Authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+    configured_headers = os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", "").strip()
+    if configured_headers:
+        for item in configured_headers.split(","):
+            name, separator, value = item.partition("=")
+            if not separator or not name.strip():
+                raise ValueError("OTEL_EXPORTER_OTLP_HEADERS must contain name=value pairs")
+            headers[name.strip()] = unquote(value.strip())
     request = Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
     try:
         with urlopen(request, timeout=10) as response:
@@ -57,37 +63,91 @@ def send(payload: dict) -> bool:
         return False
 
 
+MAX_LINE_BYTES = 1024 * 1024
+
+
+def read_batch(path: Path, offset: int, limit: int = 100) -> tuple[list[dict], int]:
+    """Read complete JSONL records with byte offsets and bounded memory."""
+    records = []
+    with path.open("rb") as stream:
+        stream.seek(offset)
+        for _ in range(limit):
+            start = stream.tell()
+            line = stream.readline(MAX_LINE_BYTES + 1)
+            if not line:
+                break
+            if len(line) > MAX_LINE_BYTES:
+                while line and not line.endswith(b"\n"):
+                    line = stream.readline(MAX_LINE_BYTES + 1)
+                if not line.endswith(b"\n"):
+                    return records, start
+                offset = stream.tell()
+                continue
+            if not line.endswith(b"\n"):
+                break  # The producer has not finished this record yet.
+            offset = stream.tell()
+            try:
+                record = json.loads(line)
+                if isinstance(record, dict):
+                    # Validate mappings before acknowledging a malformed line.
+                    to_otlp(record)
+                    records.append(record)
+            except (ValueError, TypeError, UnicodeError, OverflowError):
+                continue
+    return records, offset
+
+
+def export_once(path: Path, offset_path: Path) -> bool:
+    """Commit the cursor only after the complete batch is accepted."""
+    if not path.exists():
+        return False
+    info = path.stat()
+    identity = [info.st_dev, info.st_ino]
+    offset = 0
+    try:
+        checkpoint = json.loads(offset_path.read_text(encoding="utf-8"))
+        if isinstance(checkpoint, dict) and checkpoint.get("identity") == identity:
+            offset = int(checkpoint["offset"])
+        elif isinstance(checkpoint, int):
+            offset = checkpoint  # Migrate checkpoints from older releases.
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+    if offset < 0 or offset > info.st_size:
+        offset = 0
+    records, next_offset = read_batch(path, offset)
+    if next_offset == offset:
+        return False
+    if records:
+        payload = {"resourceLogs": [to_otlp(record)["resourceLogs"][0] for record in records]}
+        if not send(payload):
+            return False
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=offset_path.parent,
+                                         prefix=offset_path.name + ".", delete=False) as output:
+            temporary = Path(output.name)
+            json.dump({"identity": identity, "offset": next_offset}, output)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(offset_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return True
+
+
 def run() -> None:
     path = Path(os.environ.get("TDS_LOG_PATH", r"C:\ProgramData\TDS\tds_threat_events.jsonl"))
     offset_path = path.with_suffix(path.suffix + ".otlp.offset")
-    offset = int(offset_path.read_text().strip()) if offset_path.exists() else 0
+    interval = float(os.environ.get("TDS_OTLP_POLL_SECONDS", "2"))
+    if not 0 < interval <= 3600:
+        raise ValueError("TDS_OTLP_POLL_SECONDS must be between 0 and 3600")
     while True:
-        if path.exists():
-            size = path.stat().st_size
-            if offset > size:
-                offset = 0
-            with path.open("r", encoding="utf-8", errors="replace") as stream:
-                stream.seek(offset)
-                pending = []
-                for line in stream:
-                    try:
-                        pending.append((json.loads(line), stream.tell()))
-                    except json.JSONDecodeError:
-                        continue
-                new_offset = stream.tell()
-            if pending:
-                batch = pending[:100]
-                payload = {"resourceLogs": []}
-                for record, _ in batch:
-                    converted = to_otlp(record)["resourceLogs"][0]
-                    payload["resourceLogs"].append(converted)
-                if send(payload):
-                    offset = batch[-1][1]
-                    offset_path.write_text(str(offset), encoding="utf-8")
-            elif not pending:
-                offset = new_offset
-                offset_path.write_text(str(offset), encoding="utf-8")
-        time.sleep(float(os.environ.get("TDS_OTLP_POLL_SECONDS", "2")))
+        try:
+            export_once(path, offset_path)
+        except (OSError, ValueError) as error:
+            print(f"TDS exporter: {error}", flush=True)
+        time.sleep(interval)
 
 
 if __name__ == "__main__":

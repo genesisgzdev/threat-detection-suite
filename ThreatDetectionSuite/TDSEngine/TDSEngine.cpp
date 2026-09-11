@@ -4,6 +4,7 @@
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <algorithm>
+#include <iterator>
 #include <winternl.h>
 #include <unordered_set>
 #include <amsi.h>
@@ -38,6 +39,7 @@ TDSEngine::~TDSEngine() {
 
 void TDSEngine::Start() {
     if (m_running) return;
+    m_eventBus->Resume();
     m_running = true;
     m_analysisThread = std::thread(&TDSEngine::AnalysisLoop, this);
 }
@@ -59,8 +61,9 @@ EventBus::Stats TDSEngine::QueueStats() const {
 }
 
 void TDSEngine::AnalysisLoop() {
-    while (m_running) {
+    while (true) {
         auto eventOpt = m_eventBus->WaitAndPop(500);
+        if (!eventOpt && !m_running) break;
         if (eventOpt) {
             // Behavioral Heuristics Engine
             HeuristicsEngine::Instance().ProcessEvent(*eventOpt);
@@ -133,8 +136,9 @@ void TDSEngine::EvaluateThreat(const Event& event) {
         case TDSEventNetworkConnect: {
             if (auto data = std::get_if<NetworkEvent>(&event.Data)) {
                 TDS_NETWORK_EVENT_DATA netData = {};
-                netData.AddressFamily = AF_INET; 
+                netData.AddressFamily = data->AddressFamily;
                 netData.Ipv4Address = data->RemoteAddress;
+                std::copy(std::begin(data->Ipv6Address), std::end(data->Ipv6Address), std::begin(netData.Ipv6Address));
                 netData.RemotePort = data->RemotePort;
                 netData.Protocol = data->Protocol;
                 NetworkDetector::AnalyzeConnection(event.Pid, netData);

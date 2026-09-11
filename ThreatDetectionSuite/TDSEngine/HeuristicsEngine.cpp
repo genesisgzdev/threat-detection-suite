@@ -1,4 +1,5 @@
 #include "HeuristicsEngine.h"
+#include "../TDSCommon/EventAttribution.h"
 #include "Logger.h"
 #include "ips/IPSManager.h"
 #include <iostream>
@@ -12,17 +13,9 @@ void HeuristicsEngine::ProcessEvent(const Event& event) {
     if (event.Type == TDSEventProcessCreate) {
         m_processContexts.erase(event.Pid);
     }
-    uint32_t attributedPid = event.Pid;
-    bool responseTargetKnown = true;
-    if (event.Type == TDSEventRemoteThread || event.Type == TDSEventApcInjection ||
-        event.Type == TDSEventEtwTiApcInjection) {
-        if (const auto* injection = std::get_if<RemoteThreadEvent>(&event.Data)) {
-            attributedPid = injection->TargetPid;
-        } else if (const auto* etw = std::get_if<EtwApcEvent>(&event.Data)) {
-            attributedPid = etw->TargetKnown ? etw->TargetPid : etw->SourcePid;
-            responseTargetKnown = etw->TargetKnown;
-        }
-    }
+    const auto target = ResponseTarget(event);
+    if (!target) return;
+    const uint32_t attributedPid = *target;
     auto& ctx = m_processContexts[attributedPid];
     ctx.Pid = attributedPid;
     ctx.LastActivity = std::chrono::steady_clock::now();
@@ -59,7 +52,7 @@ void HeuristicsEngine::ProcessEvent(const Event& event) {
             return;
     }
 
-    EvaluateRisk(attributedPid, responseTargetKnown);
+    EvaluateRisk(attributedPid, true);
 }
 
 void HeuristicsEngine::EvaluateRisk(uint32_t pid, bool responseTargetKnown) {
