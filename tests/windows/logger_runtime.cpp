@@ -15,7 +15,7 @@ int main() {
         const std::string blocked = std::string(filename) + "\\not-a-directory.jsonl";
         _putenv_s("TDS_LOG_PATH", blocked.c_str());
         auto& logger = TDS::Logger::Instance();
-        logger.LogThreat(TDS_SEVERITY_MEDIUM, CAT_DLL_INJECTION, "control\x01\ntext", "quote\"", 0);
+        logger.LogThreat(TDS::TDS_SEVERITY_MEDIUM, TDS::CAT_DLL_INJECTION, "control\x01\ntext", "quote\"", 0);
         logger.FlushToDisk();
         _putenv_s("TDS_LOG_PATH", filename);
         logger.FlushToDisk();

@@ -62,4 +62,4 @@ La [guía](docs/USO.md) explica las rutas de archivos, los mensajes y cómo dete
 
 En Linux puedes comprobar las herramientas y contratos con `bash build.sh` y `python -m unittest discover -s tests -p "test_*.py"`. Esas comprobaciones no producen un ejecutable Windows.
 
-Licencia [MIT](LICENSE).
+Licencia [Apache 2.0](LICENSE).
