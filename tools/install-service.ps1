@@ -15,6 +15,8 @@ $driverSys = Join-Path $InstallRoot 'ThreatDetectionKernel.sys'
 if (-not (Test-Path -LiteralPath $serviceExe)) { throw "Missing service binary: $serviceExe" }
 if ($InstallDriver -and -not (Test-Path -LiteralPath $driverSys)) { throw "Missing driver binary: $driverSys" }
 
+if (-not $PSCmdlet.ShouldProcess($InstallRoot, 'install and configure TDS services')) { return }
+
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($service) {
     if ($PSCmdlet.ShouldProcess($serviceName, 'stop and replace service')) { Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue }
@@ -27,7 +29,9 @@ if ($PSCmdlet.ShouldProcess($serviceName, 'create service')) {
     & sc.exe config $serviceName obj= LocalSystem | Out-Null
 }
 
-[Environment]::SetEnvironmentVariable('TDS_RESPONSE_MODE', $ResponseMode, 'Machine')
+if ($PSCmdlet.ShouldProcess('TDS_RESPONSE_MODE', 'set machine response mode')) {
+    [Environment]::SetEnvironmentVariable('TDS_RESPONSE_MODE', $ResponseMode, 'Machine')
+}
 
 if ($InstallDriver -and $PSCmdlet.ShouldProcess($driverName, 'install kernel driver service')) {
     & sc.exe create $driverName type= kernel start= demand binPath= "`"$driverSys`"" DisplayName= "Threat Detection Suite Kernel" | Out-Null

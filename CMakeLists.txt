@@ -101,3 +101,8 @@ add_custom_target(TDSDriverBuild
 
 add_executable(TDSEventBusTests tests/windows/event_bus_runtime.cpp)
 add_test(NAME event_bus_runtime COMMAND TDSEventBusTests)
+
+add_executable(TDSLoggerRuntimeTests tests/windows/logger_runtime.cpp)
+target_link_libraries(TDSLoggerRuntimeTests dbghelp)
+add_test(NAME logger_runtime COMMAND TDSLoggerRuntimeTests)
+add_test(NAME service_help COMMAND TDSService --help)

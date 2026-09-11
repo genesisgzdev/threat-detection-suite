@@ -1,17 +1,17 @@
 # Mapa del repositorio
 
-Revisión de estructura y flujos: 2026-09-11. Este inventario cubre los archivos versionados y las incorporaciones de esta revisión; excluye dependencias instaladas y artefactos de build. Los límites de validación aparecen por área.
+Usa este índice cuando quieras encontrar una parte del proyecto. Para empezar a usarlo, vuelve al [README](../README.md). Los archivos generados al compilar y las dependencias instaladas quedan fuera del mapa.
 
-## Flujos y fronteras
+## Qué hace cada parte
 
-| Área | Recorrido real | Verificación / límite |
+| Área | Recorrido | Qué conviene comprobar |
 | --- | --- | --- |
 | Kernel | callbacks → ABI versionado → SLIST acotada → IOCTL autorizado | Contrato y proyecto WDK; Driver Verifier y descarga real pendientes |
 | Ingesta | TDSService/Bridge → validación de payload → EventBus | Orden por timestamp e inserción; capacidad y pérdidas observables |
 | ETW | sesión por proceso → eventos de proveedor → atribución | Un target desconocido no se convierte en PID de respuesta |
 | Análisis | heurísticas, correlación, detectores, escáner de memoria | Windows user-mode compilado; no equivale a eficacia de detección medida |
 | Respuesta | ResponsePolicy observe/alert/contain/terminate → IPS | Observe por defecto; operaciones privilegiadas requieren laboratorio |
-| Salida | Logger JSONL → exportador OTLP → collector | Lotes acotados, reintento HTTP, cursor atómico y rotación; entrega al menos una vez |
+| Salida | Logger JSONL → panel local o exportador OTLP | Búfer acotado con reintento de archivo; OTLP conserva su cursor y puede repetir entregas |
 | Herramientas separadas | SOC bot, installer, driver build, diagnósticos, arneses de laboratorio | No se ejecutaron arneses de ataque ni acciones sobre equipos externos |
 
 ThreatIntelManager no implementa todavía un proveedor de enriquecimiento. YARA es opcional y no está activado en el build estándar. El bot GitHub es un consumidor separado y no comparte las garantías de checkpoint del exportador OTLP. Un archivo rotado y eliminado antes de su lectura no puede recuperarse. Este mapa distingue componentes presentes de comportamientos verificados; no es una certificación EDR.
@@ -93,3 +93,8 @@ ThreatIntelManager no implementa todavía un proveedor de enriquecimiento. YARA 
 | [tools/soc/requirements.txt](../tools/soc/requirements.txt) | Dependencias y comandos del componente |
 | [tools/soc/soc_bot.py](../tools/soc/soc_bot.py) | Módulo: soc_bot |
 | [tools/uninstall-service.ps1](../tools/uninstall-service.ps1) | Herramienta de ejecución: uninstall-service |
+| [docs/USO.md](../docs/USO.md) | Guía de instalación, lectura y diagnóstico |
+| [tools/monitor.py](../tools/monitor.py) | Sirve eventos recientes en un panel local de solo lectura |
+| [tools/monitor.html](../tools/monitor.html) | Presenta búsqueda, prioridades y detalle de eventos reales |
+| [tests/test_monitor.py](../tests/test_monitor.py) | Comprueba lectura incremental, rotación y acceso HTTP local |
+| [tests/windows/logger_runtime.cpp](../tests/windows/logger_runtime.cpp) | Comprueba que un fallo de escritura conserva datos y que el JSON es válido |
