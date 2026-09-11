@@ -16,21 +16,18 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-      - uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: c-cpp
           build-mode: manual
-      - uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
-        with:
-          arch: x64
       - name: Configure user-mode build for CodeQL
-        run: cmake -S . -B build -A x64 -DTDS_ENABLE_YARA=OFF
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DTDS_ENABLE_YARA=OFF
       - name: Build user-mode code for CodeQL
         run: cmake --build build --config Release --parallel
-      - uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       - name: Secret scan
         shell: pwsh
         run: |
