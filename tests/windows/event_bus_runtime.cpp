@@ -1,4 +1,5 @@
 #include "EventBus.h"
+#include "EventAttribution.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -7,6 +8,13 @@ void require(bool value, const char* reason) {
 }
 int main() {
     try {
+        TDS::Event signal{}; signal.Type = TDSEventEtwTiApcInjection; signal.Pid = 12;
+        signal.Data = TDS::EtwApcEvent{12, 0, false};
+        require(!TDS::ResponseTarget(signal), "unknown ETW target must not use emitter PID");
+        signal.Data = TDS::EtwApcEvent{12, 45, true};
+        require(TDS::ResponseTarget(signal) == 45, "decoded target attribution");
+        signal.Data = std::monostate{};
+        require(!TDS::ResponseTarget(signal), "missing injection payload has no response target");
         TDS::EventBus bus;
         TDS::Event first{}; first.Type = TDSEventProcessCreate; first.Timestamp = 10; first.Pid = 1;
         auto second = first; second.Pid = 2;
