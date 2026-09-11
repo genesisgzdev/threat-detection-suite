@@ -1,99 +1,65 @@
-# Threat Detection Suite (TDS)
+# Threat Detection Suite
 
-> **Development status:** TDS is an active Windows 10/11 x64 engineering project.
-> The user-mode event contract, bounded kernel queue, service ingestion path and
-> observe-first response policy are being hardened. Do not deploy the driver on
-> production hosts until the Windows/WDK, Driver Verifier and isolated ATT&CK
-> acceptance suites pass. The default response mode is `observe`.
+TDS recoge actividad de Windows y guarda observaciones que ayudan a investigar comportamientos inusuales. El panel permite leerlas, buscar una aplicación y abrir los datos de cada evento sin tener que recorrer líneas de código.
 
-## Runtime configuration
+[Ver comprobaciones](https://github.com/genesisgzdev/threat-detection-suite/actions) · [Instalación y uso](docs/USO.md) · [Cómo funciona](docs/ARCHITECTURE.md)
 
-- `TDS_RESPONSE_MODE=observe|alert|contain|terminate` controls staged response.
-- `TDS_LOG_PATH` selects the JSONL output path; the default is the current working directory.
-- `TDS_FORENSICS=1` enables critical-alert process dumps; it is disabled by default.
-- `TDS_ENABLE_YARA` is a CMake option and defaults to `OFF` unless a YARA SDK is supplied.
+## Ya tienes TDS instalado
 
-## System Architecture
+Abre PowerShell dentro de la carpeta del proyecto y comprueba su estado:
 
-The Threat Detection Suite (TDS) operates across two primary execution rings: Kernel-Mode (Ring 0) and User-Mode (Ring 3). This separation ensures that high-latency heuristic analysis does not induce system-wide DPC (Deferred Procedure Call) latency or bug checks (BSOD).
-
-```mermaid
-graph TD
-    subgraph KERNEL["Ring 0 - Kernel Mode"]
-        WFP[WFP ALE IPv4 callout] -->|Network Telemetry| EL[Event Lookaside List]
-        PROC[Process callback] --> EL;
-        IMG[Image callback] --> EL;
-        THR[Thread callback] --> EL;
-        MF[Minifilter Callback] -->|File I/O Telemetry| EL
-        OB[ObRegisterCallbacks] -->|Process Handle Req| EL
-        EL -->|InterlockedPushEntrySList| SList[Lock-Free SList Queue]
-        IOCTL[IOCTL_TDS_GET_NEXT_EVENT] -->|InterlockedPopEntrySList| SList
-        STATS[IOCTL_TDS_GET_QUEUE_STATS] -->|depth high-watermark drops| SList
-    end
-
-    subgraph USER["Ring 3 - User Mode"]
-        SList -->|Buffered IRP| Svc[TDS Analysis Service]
-        Svc -->|ETW-Ti Session| ETW[EtwCollector]
-        Svc -->|MEM_PRIVATE Scan| YARA["MemoryScanner / libyara"]
-        Svc -->|Shannon Entropy| Heuristics[HeuristicsEngine]
-        Heuristics -->|score 70: alert candidate| RP[ResponsePolicy]
-        RP -->|contain >=85 or terminate >=95| IPS[IPSManager]
-        IPS -->|NtTerminateProcess| Threat[Malicious Process]
-        Heuristics -->|Log Event| Log[tds_threat_events.jsonl]
-    end
-    
-    subgraph RESPONSE["Automation - Response"]
-        Log -->|tail -f| Bot[SOC Bot python]
-        Bot -->|HTTP POST| GitHub[GitHub Issues API]
-    end
+```powershell
+.\tools\doctor.ps1
 ```
 
-## Core Implementation Details
+El diagnóstico te dice si el servicio está en marcha, si el controlador adicional está activo y dónde espera encontrar el informe. Distingue un problema que impide funcionar de una función opcional que aún no está disponible.
 
-### 1. Windows Filtering Platform (WFP)
-El driver registra hoy un sublayer dinámico y un callout en `FWPS_LAYER_ALE_AUTH_CONNECT_V4`. El callback observa conexiones IPv4 y copia al evento la dirección remota, el puerto y el protocolo después de validar los índices y tipos del layer. Cuando la política permite containment, bloquea el caso implementado para tráfico remoto al puerto 53 con tamaño superior a 512 bytes. No se debe leer este código como cobertura IPv6 o de `DATAGRAM_DATA`: esas capas no están registradas en el camino actual.
+Para abrir el panel necesitas Python 3.10 o posterior:
 
-### 2. Lock-Free Telemetry Queuing
-Traditional `KSPIN_LOCK` synchronization in high-I/O environments (such as ransomware encrypting a drive) causes severe processor contention.
-- **Memory Allocation**: The driver initializes an `NPAGED_LOOKASIDE_LIST` during `DriverEntry`. High-frequency callbacks allocate event buffers from this pool, guaranteeing constant-time, fragmentation-free allocation.
-- **Queueing**: Events are pushed to an `SLIST_HEADER` using `InterlockedPushEntrySList`. The user-mode service retrieves them via `IOCTL_TDS_GET_NEXT_EVENT` using `InterlockedPopEntrySList`. If the caller's buffer is too small, a valid event is reinserted and the required size is returned; only invalid records or a full queue count as drops. `IOCTL_TDS_GET_QUEUE_STATS` exposes current depth, high-water mark and cumulative drops so a bounded queue cannot lose evidence silently. This does not recover drops caused by pressure; it makes them observable.
+```powershell
+python tools/monitor.py
+```
 
-### 3. IOCTL boundary and queue pressure
-Los IOCTL usan `METHOD_BUFFERED`, validan tamaño, versión, flags y límites antes de copiar datos. La política se autoriza por el ACL del device seguro y por el access bit del IOCTL; el driver no confía en el nombre o la ruta del ejecutable solicitante. Un buffer de salida insuficiente no consume un evento válido. La cola de análisis ordena por el timestamp común porque la `SLIST` del transporte kernel es LIFO; un evento que llega tarde sigue marcado como telemetría tardía y no se convierte en una garantía de orden total. `IOCTL_TDS_GET_QUEUE_STATS` expone profundidad y eventos descartados; cuando la cola llega a `EVENT_QUEUE_LIMIT`, el driver descarta el evento y aumenta el contador en vez de crecer sin límite. El callback WFP parte de `PERMIT` incluso si faltan campos de telemetría; sólo una política de containment válida puede cambiar esa decisión. La fuzzing de IRP, Driver Verifier y las pruebas de unload siguen siendo validación nativa pendiente.
+Abre **http://127.0.0.1:8765** en tu navegador. El panel lee los eventos reales cada tres segundos. Puedes buscar por palabras o proceso y filtrar por prioridad. Cerrar el panel no detiene el servicio.
 
-`TDS_POLICY_FLAG_PROTECT_SERVICE` controla el filtrado de handles contra el proceso del servicio, sus hilos y la imagen LSASS verificada. `TDS_POLICY_FLAG_ENABLE_WFP` y `TDS_POLICY_FLAG_ENABLE_MINIFILTER` controlan la emisión de sus callbacks registrados; el servicio solicita explícitamente esas señales al aplicar la policy. La protección no se activa por el mero hecho de abrir el device; cada callback toma una copia de la política vigente antes de decidir.
+## Entender una observación
 
-La respuesta user-mode aplica además una barrera deny-only para PID 0-4, `lsass.exe` y `TDSService.exe` antes de suspender o terminar. Esa barrera no autentica procesos ni sustituye el ACL del device; evita que un false positive de heurística convierta la respuesta automática en una caída del sistema.
+| Lo que ves | Qué significa |
+| --- | --- |
+| Revisión prioritaria | Conviene investigar pronto la observación y su contexto |
+| Proceso | Identificador de la aplicación asociada al evento |
+| Observación original | Datos guardados por TDS para revisar el detalle |
+| No hay archivo o eventos | No hay datos legibles en esa ruta; no demuestra que el equipo esté protegido |
+| Controlador no activo | No está disponible la recogida adicional que depende de él |
 
-El `EventBus` de user-mode mantiene una segunda cola acotada para el análisis. Sus métricas separan profundidad actual, máximo observado, descartados totales y descartados por tipo de evento. Un descarte en cualquiera de las dos colas significa telemetría incompleta; no se interpreta como ausencia de actividad.
+TDS observa por defecto. Una alerta no es una sentencia sobre una aplicación. Los modos que intervienen en conexiones o procesos requieren configuración expresa y validación en el entorno donde se usan.
 
-### 4. Process Tamper Protection
-Protection of critical processes (such as LSASS and the TDS user-mode service) is implemented via `ObRegisterCallbacks`.
-- **Identity**: the driver retains a referenced `PEPROCESS` for the process that successfully sets the policy through the device IOCTL and clears it on process termination. LSASS still uses `PsGetProcessSignatureLevel()` and a system path check. A PID or executable path is not used as an identity primitive.
-- **Access Stripping**: Handles requesting `PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `PROCESS_SUSPEND_RESUME`, or `PROCESS_CREATE_THREAD` against protected PIDs have those flags stripped from their `DesiredAccess` mask by the kernel.
+```mermaid
+flowchart TD
+    A["Windows produce actividad"] --> B["TDS recoge y relaciona eventos"]
+    B --> C["Guarda observaciones"]
+    C --> D["El panel te ayuda a revisarlas"]
+    B --> E["La respuesta depende del modo configurado"]
+```
 
-### 5. Minifilter Reentrancy Prevention
-To prevent infinite recursion deadlocks—where the EDR intercepts its own log writes—the driver implements requestor-awareness.
-- `TDSPreWriteCallback` invokes `FltGetRequestorProcess()`. If the originating process is the TDS user-mode service, the IRP is skipped (`FLT_PREOP_SUCCESS_NO_CALLBACK`). Events use `PsGetProcessId(requestor)` because the callback may run on a filesystem worker thread; `PsGetCurrentProcessId()` is not treated as the originator.
-- The registration currently covers writes. Paging-I/O exclusion is not claimed by the source and must not be inferred from the documentation.
+## Todavía no lo has instalado
 
-### 6. User-Mode Memory Scanning and YARA
-The `MemoryScanner` class integrates `libyara` directly into the C++ runtime.
-- It iterates through the virtual address space of running processes, specifically targeting `MEM_PRIVATE` pages with `PAGE_EXECUTE_READWRITE` or `PAGE_EXECUTE_READ` protections.
-- **Direct Syscalls & Stack Pivoting**: The scanner statically searches for `0x0F 0x05` (syscall) instructions outside of `ntdll.dll` boundaries, and uses `NtQueryInformationThread` to verify that the current stack pointer resides within the bounds defined by the Thread Environment Block (TEB).
+TDS incluye código de un servicio de Windows y de un controlador que se compila por separado. No es un instalador universal ni un antivirus certificado listo para cualquier equipo. La [guía de instalación](docs/USO.md) separa la compilación, la instalación del servicio y la validación del controlador.
 
-### 7. Automated Incident Response (SOC Bot)
-The `tools/soc/soc_bot.py` script provides real-time automated reporting.
-- It performs a non-blocking `tail` on the `tds_threat_events.jsonl` log file.
-- When an event with `HIGH` or `CRITICAL` severity is written by the `HeuristicsEngine`, the bot constructs a Markdown report and pushes it to the GitHub Issues API using standard HTTPS requests.
-- The bot relies strictly on environment variables (`GITHUB_TOKEN`, `TDS_LOG_PATH`), containing no hardcoded local paths or credentials.
+Para compilar el servicio necesitas Windows, Visual Studio 2022 con herramientas C++ y CMake:
 
-## Entrega y cierre del proceso
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DTDS_ENABLE_YARA=OFF
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+```
 
-El EventBus conserva el orden de inserción cuando coinciden los timestamps y drena los eventos aceptados al detenerse. CTest ejecuta estos casos sobre Windows, incluido el límite de capacidad y sus métricas. Cada proceso usa su propia sesión ETW, sin detener una sesión ajena al arrancar.
+El controlador necesita además Windows Driver Kit y una firma aceptada por Windows. La compilación del servicio no comprueba que el controlador esté instalado o funcionando.
 
-El exportador `tools/soc/otlp_exporter.py` lee lotes acotados de 100 registros completos, reintenta errores HTTP sin adelantar el cursor y detecta reemplazos del archivo mediante su identidad. El checkpoint se escribe de forma atómica después de una entrega aceptada. La entrega es al menos una vez: una caída después del HTTP exitoso y antes del checkpoint puede repetir un lote. No recupera archivos ya eliminados durante una rotación. `OTEL_EXPORTER_OTLP_HEADERS` usa pares separados por coma, por ejemplo `Authorization=Bearer%20TOKEN`; no se registran esos valores. Las pruebas usan un servidor HTTP local que primero falla y después acepta el lote.
+## Encontrar el detalle
 
-Las señales ETW sin target decodificado se mantienen en la telemetría, pero no incrementan el score de un PID emisor: otro evento posterior no puede convertir esa atribución desconocida en autorización para actuar. El escáner limita la iteración a los módulos realmente almacenados y evita restas sin signo al inspeccionar buffers cortos. El enriquecedor ThreatIntelManager todavía no tiene proveedor implementado; configurar TDS_TI_ENDPOINT no activa consultas.
+La [guía](docs/USO.md) explica las rutas de archivos, los mensajes y cómo detener el servicio. La [arquitectura](docs/ARCHITECTURE.md) explica las colas, el controlador y la respuesta. El [mapa de archivos](docs/REPOSITORY_MAP.md) enlaza con cada parte del código.
 
-El inventario completo de archivos y flujos está en [docs/REPOSITORY_MAP.md](docs/REPOSITORY_MAP.md).
+En Linux puedes comprobar las herramientas y contratos con `bash build.sh` y `python -m unittest discover -s tests -p "test_*.py"`. Esas comprobaciones no producen un ejecutable Windows.
+
+Licencia [MIT](LICENSE).

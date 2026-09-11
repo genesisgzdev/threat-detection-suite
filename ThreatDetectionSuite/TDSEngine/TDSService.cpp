@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -11,6 +11,7 @@
 #include "../TDSCommon/TDSCommon.h"
 #include "../TDSCommon/TDSEvents.h"
 #include "TDSEngine.h"
+#include "Logger.h"
 #include "collectors/EtwCollector.h"
 
 // Threat Detection Suite v5.6.7 - Native Windows Service
@@ -100,15 +101,27 @@ static std::optional<TDS::Event> DecodeKernelEvent(const BYTE* buffer, DWORD byt
 }
 
 int wmain(int argc, wchar_t *argv[]) {
-    UNREFERENCED_PARAMETER(argc);
-    UNREFERENCED_PARAMETER(argv);
+    if (argc > 1) {
+        if (argc == 2 && (wcscmp(argv[1], L"--help") == 0 || wcscmp(argv[1], L"-h") == 0)) {
+            std::cout << "TDS | Servicio de observacion de Windows\n"
+                      << "Instalacion y estado: consulta docs/USO.md y tools/doctor.ps1\n"
+                      << "Panel de lectura: python tools/monitor.py\n";
+            return 0;
+        }
+        std::cerr << "Opcion no reconocida. Usa --help.\n";
+        return 2;
+    }
     SERVICE_TABLE_ENTRYW ServiceTable[] = {
         {(LPWSTR)SERVICE_NAME, (LPSERVICE_MAIN_FUNCTIONW)ServiceMain},
         {NULL, NULL}
     };
 
     if (StartServiceCtrlDispatcherW(ServiceTable) == FALSE) {
-        return GetLastError();
+        const DWORD error = GetLastError();
+        if (error == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) {
+            std::cerr << "TDS se inicia como servicio de Windows. Consulta docs/USO.md.\n";
+        }
+        return static_cast<int>(error);
     }
 
     return 0;
@@ -224,6 +237,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     TDS_QUEUE_STATS queueStats = {};
     ULONG lastDroppedEvents = 0;
     while (WaitForSingleObject(g_ServiceStopEvent, 1000) == WAIT_TIMEOUT) {
+        TDS::Logger::Instance().FlushToDisk();
         if (hDevice == INVALID_HANDLE_VALUE) {
             hDevice = OpenDriverWithPolicy(policy);
             if (hDevice == INVALID_HANDLE_VALUE) {
@@ -254,5 +268,6 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
     if (hDevice != INVALID_HANDLE_VALUE) CloseHandle(hDevice);
     etw.Stop();
     engine.Shutdown();
+    TDS::Logger::Instance().FlushToDisk();
     return ERROR_SUCCESS;
 }

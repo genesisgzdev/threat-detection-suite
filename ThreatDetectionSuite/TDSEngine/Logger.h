@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -46,6 +46,10 @@ public:
         if (m_buffer.size() >= 1000) {
             FlushToDiskInternal();
         }
+        if (m_buffer.size() >= 1000) {
+            OutputDebugStringA("TDS: event not buffered because the log file is unavailable and the buffer is full.\n");
+            return;
+        }
         m_buffer.push_back(log);
         
         printf("[%s] [%s] %s (PID: %u)\n", 
@@ -72,13 +76,23 @@ private:
             case '\n': escaped += "\\n"; break;
             case '\r': escaped += "\\r"; break;
             case '\t': escaped += "\\t"; break;
-            default: escaped.push_back(static_cast<char>(*p)); break;
+            default:
+                if (*p < 0x20) {
+                    const char hex[] = "0123456789abcdef";
+                    escaped += "\\u00";
+                    escaped.push_back(hex[*p >> 4]);
+                    escaped.push_back(hex[*p & 0x0f]);
+                } else {
+                    escaped.push_back(static_cast<char>(*p));
+                }
+                break;
             }
         }
         return escaped;
     }
     
     void FlushToDiskInternal() {
+        if (m_buffer.empty()) return;
         const char* configuredPath = std::getenv("TDS_LOG_PATH");
         std::string path = configuredPath && *configuredPath ? configuredPath : "C:\\ProgramData\\TDS\\tds_threat_events.jsonl";
         if (!configuredPath || !*configuredPath) CreateDirectoryA("C:\\ProgramData", NULL);
@@ -102,7 +116,12 @@ private:
                     << ", \"pid\": " << log.AssociatedPid << "}\n";
             }
         }
-        m_buffer.clear();
+        ofs.flush();
+        if (ofs.good()) {
+            m_buffer.clear();
+        } else {
+            OutputDebugStringA("TDS: could not write events; retaining the buffer for a later attempt.\n");
+        }
     }
 
     std::vector<TDS_THREAT_LOG> m_buffer;

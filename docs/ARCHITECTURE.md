@@ -1,98 +1,64 @@
-# Threat Detection Suite architecture
+# Cómo llega una observación al panel
 
-TDS tiene dos fronteras distintas: el driver WDK en kernel y los ejecutables CMake de user mode. Las herramientas SOC y OTLP están fuera del camino de decisión del servicio.
+TDS recoge eventos de Windows, relaciona señales y escribe observaciones. El panel solo lee ese archivo. No participa en las decisiones del servicio ni cambia su modo de respuesta.
 
-## Cómo leerlo
-
-La primera figura muestra el camino de un evento. La secuencia muestra el arranque y el apagado. La última tabla indica qué se puede comprobar en Linux, qué requiere Windows y qué necesita una máquina aislada. Las líneas opcionales son integraciones separadas.
-
-## 1. Componentes y contratos
+## Recorrido de los datos
 
 ```mermaid
-flowchart LR
-    subgraph KERNEL[Windows kernel driver]
-      PROC[process image thread callbacks]
-      REG[registry callback]
-      NET[WFP callouts]
-      MINI[minifilter callbacks]
-      Q[bounded event queue]
-      ABI[event and policy ABI]
-      DEV[driver device]
-      PROC --> Q
-      REG --> Q
-      NET --> Q
-      MINI --> Q
-      Q --> ABI --> DEV
-    end
-    subgraph USER[CMake user mode]
-      S[TDSService Windows service]
-      E[TDSEngine]
-      H[heuristics and detectors]
-      C[SequenceCorrelator]
-      L[Logger JSONL rotation]
-      S --> E --> H
-      E --> C
-      E --> L
-    end
-    DEV -->|buffered event IOCTL| S
-    S -->|policy IOCTL| DEV
-    ETW[ETW telemetry] --> E
-    B[TDSBridge utility] --> E
-    L --> SOC[SOC and OTLP tools]
+flowchart TD
+    A["Actividad de Windows"] --> B["Servicio TDS y fuentes de eventos"]
+    B --> C["Motor de análisis"]
+    C --> D["Archivo de observaciones"]
+    D --> E["Panel de lectura"]
+    C --> F["Respuesta según la política configurada"]
 ```
 
-Precisión de build:
+Windows proporciona fuentes de eventos llamadas ETW. El controlador añade observaciones desde otras partes del sistema. El servicio abre ese controlador, aplica su política y vuelve a conectar si pierde el acceso. El servicio y el controlador son componentes que se compilan e instalan por separado.
 
-- CMake compila `TDSCore`, `TDSService` y `TDSBridge` en Windows.
-- `ThreatDetectionSuite/TDSDriver/TDSDriver.vcxproj` se compila con WDK por separado.
-- `build.sh` en Linux solo ejecuta checks de contratos y repositorio; no genera el driver ni un binario Windows.
-- YARA es opcional en CMake y se activa con un SDK localizado por `TDS_YARA_ROOT`.
+## Qué hace cada parte
 
-## 2. Arranque y ciclo de eventos
+| Pieza | Trabajo |
+| --- | --- |
+| `TDSDriver` | Recoger eventos y aplicar la política admitida por el controlador |
+| `TDSService` | Mantener el servicio, sus conexiones y el ciclo de trabajo |
+| `TDSEngine` | Relacionar eventos y ejecutar los detectores |
+| `Logger.h` | Guardar observaciones como una línea JSON por evento |
+| `tools/monitor.py` | Leer eventos recientes desde una ruta fija |
+| `tools/monitor.html` | Presentar búsqueda, prioridades y detalle original |
+| `tools/doctor.ps1` | Explicar el estado observable de la instalación |
 
-```mermaid
-sequenceDiagram
-    participant SCM as Windows SCM
-    participant S as TDSService
-    participant D as TDSDriver
-    participant E as TDSEngine
-    participant L as JSONL Logger
-    SCM->>S: ServiceMain
-    S->>E: Start
-    S->>S: read TDS_RESPONSE_MODE
-    S->>D: CreateFile TDS_Core_Link
-    S->>D: SET_PROTECTION_POLICY
-    loop until service stop
-      S->>D: GET_NEXT_EVENT
-      D-->>S: bounded header + payload
-      S->>S: validate size and decode offsets
-      S->>E: PushEvent valid event
-      E->>L: detection/telemetry record
-    end
-    S->>D: CloseHandle
-    S->>E: Shutdown
-```
+La lista de procesos, imágenes, hilos, conexiones y cambios del registro llega por fuentes diferentes. El motor conserva separados emisor y objetivo cuando el evento permite identificarlos. Si falta el objetivo, no lo inventa para ejecutar una respuesta.
 
-`observe` queda como política inicial. `contain` y `terminate` solo cambian los flags enviados al driver; no son evidencia de que la contención o terminación haya sido validada en una instalación Windows real.
+## Identidad, orden y capacidad
 
-Las señales de hilo remoto, APC y ETW-TI conservan separado el proceso emisor del proceso objetivo cuando el ABI lo entrega. El collector ETW conserva el emisor y marca el objetivo como desconocido cuando aún no puede decodificarlo; en ese caso el correlador no inventa un target y las respuestas automáticas quedan suprimidas. La secuencia de APC antes de la primera imagen o actividad de hilo se marca como inicialización temprana, no como prueba definitiva de Early Bird. El motor de heurísticas borra el contexto anterior al recibir un nuevo evento de creación para que un PID reciclado no herede puntuación. El estado del correlador vive solo durante el proceso del servicio: no se persiste entre reinicios porque un PID no es una identidad durable.
+Un identificador de proceso puede reutilizarse. Por eso se descarta el contexto anterior cuando aparece una nueva creación y no se conserva esa identidad entre reinicios del servicio.
 
-## 3. Seguridad de la frontera kernel/user
+El controlador verifica acceso, tamaño y versión de cada petición. La política exige permiso de escritura; leer eventos exige permiso de lectura. La sesión protegida conserva una referencia al proceso real que la estableció. No confía solo en su nombre.
 
-- Policy IOCTL exige `FILE_WRITE_ACCESS`, tamaño exacto, versión 1, flags conocidos y campos reservados en cero.
-- `TDS_POLICY_FLAG_PROTECT_SERVICE` habilita el filtrado de handles del proceso del servicio y de la imagen LSASS verificada; `TDS_POLICY_FLAG_ENABLE_WFP` y `TDS_POLICY_FLAG_ENABLE_MINIFILTER` habilitan respectivamente la telemetría de WFP y minifilter. Cada callback consulta la policy vigente antes de emitir o bloquear.
-- `IPSManager` mantiene una exclusión deny-only para PID 0-4, `lsass.exe` y `TDSService.exe` antes de containment/termination. Es una defensa adicional y no una primitiva de identidad.
-- Event IOCTL exige `FILE_READ_ACCESS`, buffer de salida suficiente y el límite `MAX_EVENT_BUFFER_SIZE`.
-- Si el buffer de salida no alcanza para un evento válido, el driver lo vuelve a insertar y devuelve el tamaño requerido; esa consulta no se cuenta como pérdida.
-- El device limita el acceso mediante ACL y los bits del IOCTL. Tras una policy válida, el driver conserva una referencia al objeto `PEPROCESS` que estableció la sesión protegida, no un nombre ni un PID; limpia esa referencia cuando el proceso termina. El servicio vuelve a abrir el device si se desconecta.
-- La cola kernel->user es acotada para que el flujo de eventos no convierta una ráfaga en crecimiento sin límite de memoria. La cola de análisis user-mode también expone profundidad, high-water mark y descartes por tipo para hacer visible la presión de transporte.
-- El driver usa una `SLIST` LIFO; al entrar al `EventBus`, la cola de análisis prioriza el `Timestamp` compartido para no invertir una ráfaga antes de heurísticas y correlación. Esto no corrige eventos tardíos entre proveedores ni establece un orden total que el ABI no entregue.
+Las colas tienen capacidad finita y exponen sus descartes. Una ráfaga no puede consumir memoria sin límite. La cola de análisis usa las marcas de tiempo para ordenar eventos recibidos, pero no promete un orden universal entre proveedores que entregan eventos tarde.
 
-## 4. Qué prueba cada gate
+Las respuestas automáticas excluyen procesos críticos y no se habilitan por abrir el panel. El modo inicial es `observe`.
 
-| Gate | Prueba | No prueba |
-| --- | --- | --- |
-| `build.sh` | contratos ABI y estructura del repo en Linux | compilación o runtime Windows |
-| user-mode CI | compilación MSVC de CMake | instalación/carga del driver |
-| driver contract | access bits, IOCTL y lifecycle estáticos | callback real, WFP real, firma |
-| laboratorio WDK | driver instalado y observado | seguridad universal en todos los Windows |
+## Guardado y lectura
+
+El servicio vacía el búfer durante su ciclo de trabajo y después de apagar el motor. El escritor escapa los caracteres de control para mantener líneas JSON legibles. Si falla el archivo, conserva un búfer acotado y emite un aviso por el canal de diagnóstico de Windows. Las reintentos tras una escritura parcial pueden repetir datos; un búfer lleno puede descartar eventos nuevos. Esas situaciones requieren atención operativa.
+
+El panel relee el último MiB del archivo y muestra por defecto 200 eventos recientes. `--limit` permite cambiar la cantidad presentada. Reabrir el archivo en cada consulta permite seguir reemplazos y rotaciones. Una última línea incompleta espera a la siguiente lectura.
+
+El servidor del panel escucha solo en `127.0.0.1`, rechaza nombres de host ajenos y no permite elegir archivos mediante peticiones web. Los datos se insertan como texto, nunca como HTML ejecutable. No ofrece acciones de control del servicio ni exporta datos a servicios externos.
+
+## Integraciones y validación
+
+YARA se habilita al compilar con su SDK. SOC y OTLP son herramientas separadas que consumen datos. El exportador conserva su punto de lectura y reintenta entregas; pueden existir duplicados. Configurar un proveedor externo sin implementación no añade inteligencia automáticamente.
+
+| Comprobación | Qué verifica |
+| --- | --- |
+| Python en Linux | Herramientas, lectura de eventos y contratos del repositorio |
+| Compilación Windows | Servicio y utilidades con MSVC |
+| CTest de Windows | Comportamientos concretos de colas, registro y ayuda |
+| Contratos del controlador | Formatos, permisos y estructura del código |
+| Instalación WDK en un entorno de pruebas | Carga y comportamiento real del controlador |
+
+Ninguna fila sustituye a las otras. El panel distingue un archivo vacío de un equipo sin problemas y el diagnóstico no confunde un servicio instalado con uno que está en marcha.
+
+[Guía de instalación y uso](USO.md) · [Mapa de archivos](REPOSITORY_MAP.md)
