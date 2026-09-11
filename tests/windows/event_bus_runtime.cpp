@@ -12,7 +12,7 @@ int main() {
         signal.Data = TDS::EtwApcEvent{12, 0, false};
         require(!TDS::ResponseTarget(signal), "unknown ETW target must not use emitter PID");
         signal.Data = TDS::EtwApcEvent{12, 45, true};
-        require(TDS::ResponseTarget(signal) == 45, "decoded target attribution");
+        require(TDS::ResponseTarget(signal) == uint32_t{45}, "decoded target attribution");
         signal.Data = std::monostate{};
         require(!TDS::ResponseTarget(signal), "missing injection payload has no response target");
         TDS::EventBus bus;
