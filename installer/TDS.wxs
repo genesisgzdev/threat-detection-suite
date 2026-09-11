@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="Threat Detection Suite" Manufacturer="Genesis" Version="5.6.5" UpgradeCode="{E9B6D6D6-AB47-4FA7-B6B6-4F7BC2DAA4D1}" Scope="perMachine">
+  <Package Name="Threat Detection Suite" Manufacturer="Genesis" Version="5.6.7" UpgradeCode="{E9B6D6D6-AB47-4FA7-B6B6-4F7BC2DAA4D1}" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer Threat Detection Suite is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <StandardDirectory Id="ProgramFiles64Folder">
