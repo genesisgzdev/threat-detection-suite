@@ -12,6 +12,9 @@ jobs:
   audit:
     runs-on: windows-2022
     timeout-minutes: 30
+    env:
+      # Manual C++ extraction requires a full database, not overlay analysis.
+      CODEQL_OVERLAY_DATABASE_MODE: none
     permissions:
       contents: read
       security-events: write
@@ -31,10 +34,14 @@ jobs:
       - name: Secret scan
         shell: pwsh
         run: |
-          $version = '8.24.3'
+          $version = '8.30.1'
           $archive = Join-Path $env:RUNNER_TEMP "gitleaks-$version.zip"
           $install = Join-Path $env:RUNNER_TEMP "gitleaks-$version"
           $url = "https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_windows_x64.zip"
           Invoke-WebRequest -Uri $url -OutFile $archive
+          $expectedHash = 'd29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e'
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -ne $expectedHash) {
+            throw 'Gitleaks archive checksum mismatch'
+          }
           Expand-Archive -Path $archive -DestinationPath $install -Force
-          & (Join-Path $install 'gitleaks.exe') detect --source . --redact --exit-code 1 --no-banner
+          & (Join-Path $install 'gitleaks.exe') git --redact --exit-code 1 --no-banner .
